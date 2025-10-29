@@ -218,8 +218,9 @@ bool computeDailyPivots(PivotLevels &p)
    return true;
 }
 
-bool nearAny(const double price, const double *levels, int n, const double maxDistance)
+bool nearAny(const double price, double &levels[], const double maxDistance)
 {
+   int n = ArraySize(levels);
    for(int i = 0; i < n; i++)
    {
       if(MathAbs(price - levels[i]) <= maxDistance)
@@ -234,7 +235,7 @@ bool nearLongPivots(double refPrice, double maxDist)
    PivotLevels p;
    if(!computeDailyPivots(p)) return false; // if can't compute, block trades when filter is enabled
    double lvls[4] = {p.P, p.S1, p.S2, p.S3};
-   return nearAny(refPrice, lvls, 4, maxDist);
+   return nearAny(refPrice, lvls, maxDist);
 }
 
 bool nearShortPivots(double refPrice, double maxDist)
@@ -243,7 +244,7 @@ bool nearShortPivots(double refPrice, double maxDist)
    PivotLevels p;
    if(!computeDailyPivots(p)) return false;
    double lvls[4] = {p.P, p.R1, p.R2, p.R3};
-   return nearAny(refPrice, lvls, 4, maxDist);
+   return nearAny(refPrice, lvls, maxDist);
 }
 
 //------------------ Signals ------------------
@@ -446,9 +447,7 @@ void manageTrailingStops()
       long   mg  = (long)PositionGetInteger(POSITION_MAGIC);
       if(sym != _Symbol || mg != (long)MagicNumber) continue;
 
-      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
       long  type   = (long)PositionGetInteger(POSITION_TYPE);
-      double open  = PositionGetDouble(POSITION_PRICE_OPEN);
       double sl    = PositionGetDouble(POSITION_SL);
       double tp    = PositionGetDouble(POSITION_TP);
 
@@ -466,7 +465,7 @@ void manageTrailingStops()
          {
             double newSL = NormalizeDouble(desiredSL, _Digits);
             if((bid - newSL) >= minDist)
-               trade.PositionModify(ticket, newSL, tp);
+               trade.PositionModify(sym, newSL, tp);
          }
       }
       else if(type == POSITION_TYPE_SELL)
@@ -476,7 +475,7 @@ void manageTrailingStops()
          {
             double newSL = NormalizeDouble(desiredSL, _Digits);
             if((newSL - ask) >= minDist)
-               trade.PositionModify(ticket, newSL, tp);
+               trade.PositionModify(sym, newSL, tp);
          }
       }
    }
@@ -596,11 +595,15 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
 {
    if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
    {
-      long dealType = (long)trans.deal_type;
-      string sym    = trans.symbol;
-      double price  = trans.price;
-      double profit = trans.profit;
-      if(trans.entry == DEAL_ENTRY_IN)
+      long dealType     = (long)trans.deal_type;
+      string sym        = trans.symbol;
+      double price      = trans.price;
+      ulong  dealTicket = trans.deal;
+      double profit     = 0.0;
+      if(HistoryDealSelect(dealTicket))
+         profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+
+      if(trans.deal_entry == DEAL_ENTRY_IN)
       {
          if(dealType == DEAL_TYPE_BUY)
             PrintFormat("DEAL OPEN BUY %s @ %.2f", sym, price);
@@ -609,7 +612,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
          if(UsePushNotifications)
             SendNotification(StringFormat("Opened %s %s @ %.2f", (dealType==DEAL_TYPE_BUY?"BUY":"SELL"), sym, price));
       }
-      else if(trans.entry == DEAL_ENTRY_OUT)
+      else if(trans.deal_entry == DEAL_ENTRY_OUT)
       {
          PrintFormat("DEAL CLOSE %s %s @ %.2f P/L=%.2f", sym, (dealType==DEAL_TYPE_SELL?"SELL":"BUY"), price, profit);
          if(UsePushNotifications)
