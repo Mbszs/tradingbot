@@ -1,6 +1,6 @@
 #property copyright "Cursor Assistant"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 #property description "High-Win-Rate Gold EA (XAUUSD) for MT5: EMA ribbon (8/21/50), RSI(14), Stochastic(5,3,3) confirmations, ATR-based SL/TP and optional trailing, optional Pivot filter, spread/session filters, risk-based sizing, logging and notifications."
 
@@ -82,10 +82,9 @@ ENUM_TIMEFRAMES g_tf = PERIOD_CURRENT;
 bool isSymbolGold(const string symbol)
 {
    if(!RestrictToXAUUSD) return true;
-   // Accept common gold symbols: XAUUSD, XAUUSD.*, GOLD, etc.
    if(StringFind(symbol, "XAUUSD", 0) >= 0) return true;
-   if(StringFind(symbol, "XAU", 0) >= 0)    return true;
-   if(StringFind(symbol, "GOLD", 0) >= 0)   return true;
+   if(StringFind(symbol, "XAU", 0)    >= 0) return true;
+   if(StringFind(symbol, "GOLD", 0)   >= 0) return true;
    return false;
 }
 
@@ -134,7 +133,6 @@ bool inRolloverWindow()
    int endMin   = minutesOfDay(RolloverEndHour,   RolloverEndMinute);
    if(startMin <= endMin)
       return (nowMin >= startMin && nowMin < endMin);
-   // window wraps past midnight
    return (nowMin >= startMin || nowMin < endMin);
 }
 
@@ -155,7 +153,7 @@ bool isWithinSessions()
 
 bool getBarTime(datetime &barTime)
 {
-   datetime t[1];
+   datetime t[];
    if(CopyTime(_Symbol, g_tf, 0, 1, t) != 1)
       return false;
    barTime = t[0];
@@ -166,7 +164,7 @@ bool getBarTime(datetime &barTime)
 bool getIndicatorValue(int handle, int bufferIndex, int shift, double &out)
 {
    if(handle == INVALID_HANDLE) return false;
-   double data[2];
+   double data[];
    if(CopyBuffer(handle, bufferIndex, shift, 1, data) != 1)
       return false;
    out = data[0];
@@ -176,7 +174,7 @@ bool getIndicatorValue(int handle, int bufferIndex, int shift, double &out)
 bool getTwoIndicatorValues(int handle, int bufferIndex, int shift, double &curr, double &prev)
 {
    if(handle == INVALID_HANDLE) return false;
-   double data[2];
+   double data[];
    if(CopyBuffer(handle, bufferIndex, shift, 2, data) != 2)
       return false;
    curr = data[0]; // shift
@@ -218,7 +216,7 @@ bool computeDailyPivots(PivotLevels &p)
    return true;
 }
 
-bool nearAny(const double price, double &levels[], const double maxDistance)
+bool nearAny(const double price, const double &levels[], const double maxDistance)
 {
    int n = ArraySize(levels);
    for(int i = 0; i < n; i++)
@@ -253,7 +251,6 @@ bool stochCrossUpFromOversold()
    double kCurr, kPrev, dCurr, dPrev;
    if(!getTwoIndicatorValues(hSTOCH, 0, 1, kCurr, kPrev)) return false; // %K
    if(!getTwoIndicatorValues(hSTOCH, 1, 1, dCurr, dPrev)) return false; // %D
-   // Cross up: K crosses above D on last closed bar; and previous K was in oversold region
    bool crossedUp = (kPrev <= dPrev && kCurr > dCurr);
    bool wasOversold = (kPrev < StochOversold && dPrev < StochOversold);
    return (crossedUp && wasOversold);
@@ -264,7 +261,6 @@ bool stochCrossDownFromOverbought()
    double kCurr, kPrev, dCurr, dPrev;
    if(!getTwoIndicatorValues(hSTOCH, 0, 1, kCurr, kPrev)) return false; // %K
    if(!getTwoIndicatorValues(hSTOCH, 1, 1, dCurr, dPrev)) return false; // %D
-   // Cross down: K crosses below D; and previous K was overbought
    bool crossedDown = (kPrev >= dPrev && kCurr < dCurr);
    bool wasOverbought = (kPrev > StochOverbought && dPrev > StochOverbought);
    return (crossedDown && wasOverbought);
@@ -272,7 +268,6 @@ bool stochCrossDownFromOverbought()
 
 bool checkLongSignal()
 {
-   // EMA ribbon and price filter
    double ema8, ema21, ema50;
    if(!getIndicatorValue(hEMA8,  0, 1, ema8))  return false;
    if(!getIndicatorValue(hEMA21, 0, 1, ema21)) return false;
@@ -290,7 +285,6 @@ bool checkLongSignal()
 
    if(!stochCrossUpFromOversold()) return false;            // Stoch cross up
 
-   // Optional pivot proximity (use ATR * PivotProximityATR)
    double atr = getATR(1);
    if(atr <= 0.0) return false;
    if(!nearLongPivots(closePrev, atr * PivotProximityATR)) return false;
@@ -333,9 +327,10 @@ double normalizeVolumeToStep(double lots)
    double vStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(vStep <= 0.0) vStep = 0.01;
    lots = MathMax(vMin, MathMin(vMax, lots));
-   // round down to step to not exceed risk
-   lots = MathFloor(lots / vStep) * vStep;
-   lots = NormalizeDouble(lots, 2);
+   lots = MathFloor(lots / vStep) * vStep; // round down to step to not exceed risk
+   int stepDigits = (int)MathRound(-MathLog10(vStep));
+   if(stepDigits < 0) stepDigits = 2;
+   lots = NormalizeDouble(lots, stepDigits);
    return lots;
 }
 
@@ -355,7 +350,6 @@ double calcLotsByRisk(double entryPrice, double slPrice)
    double priceDist = MathAbs(entryPrice - slPrice);
    if(priceDist <= 0.0) return 0.0;
 
-   // money per 1 lot for given price distance
    double ticks = priceDist / tickSize;
    double moneyPerLot = ticks * tickValue;
    if(moneyPerLot <= 0.0) return 0.0;
@@ -395,7 +389,7 @@ bool openBuy()
    }
    else
    {
-      PrintFormat("BUY failed: retcode=%d, err=%d", trade.ResultRetcode(), GetLastError());
+      PrintFormat("BUY failed: retcode=%u, err=%d", trade.ResultRetcode(), GetLastError());
    }
    return ok;
 }
@@ -428,7 +422,7 @@ bool openSell()
    }
    else
    {
-      PrintFormat("SELL failed: retcode=%d, err=%d", trade.ResultRetcode(), GetLastError());
+      PrintFormat("SELL failed: retcode=%u, err=%d", trade.ResultRetcode(), GetLastError());
    }
    return ok;
 }
@@ -490,11 +484,9 @@ void onNewBar()
    if(!isSpreadOk()) return;
    if(!isWithinSessions()) return;
 
-   // Evaluate signals on last closed bar
    bool longSignal = checkLongSignal();
    bool shortSignal = checkShortSignal();
 
-   // Prefer single direction per bar; choose one if both true (rare)
    if(longSignal && !shortSignal)
    {
       openBuy();
@@ -505,7 +497,6 @@ void onNewBar()
    }
    else if(longSignal && shortSignal)
    {
-      // If both, choose direction of EMA slope bias: compare ema8-ema21 delta
       double ema8, ema21; getIndicatorValue(hEMA8, 0, 1, ema8); getIndicatorValue(hEMA21, 0, 1, ema21);
       if(ema8 >= ema21) openBuy(); else openSell();
    }
@@ -548,7 +539,7 @@ int OnInit()
    if(!getBarTime(g_lastBarTime))
       g_lastBarTime = 0;
 
-   Print("GoldHighWinEA initialized. Timeframe=", EnumToString(g_tf));
+   Print("GoldHighWinEA initialized. TF=", (int)g_tf);
    return(INIT_SUCCEEDED);
 }
 
@@ -564,10 +555,8 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   // Manage trailing stops continuously
    manageTrailingStops();
 
-   // Only act on new bars if configured
    if(OnlyOneSignalPerBar)
    {
       datetime bt = 0;
@@ -582,9 +571,8 @@ void OnTick()
       return;
    }
 
-   // If not restricting to bar-open, we can evaluate on each tick sparingly
    static datetime lastEval = 0;
-   if(TimeCurrent() - lastEval >= 10) // evaluate at most every 10 seconds
+   if(TimeCurrent() - lastEval >= 10)
    {
       lastEval = TimeCurrent();
       onNewBar();
@@ -595,13 +583,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
 {
    if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
    {
-      long dealType     = (long)trans.deal_type;
+      long   dealType   = (long)trans.deal_type;
       string sym        = trans.symbol;
       double price      = trans.price;
       ulong  dealTicket = trans.deal;
-      double profit     = 0.0;
-      if(HistoryDealSelect(dealTicket))
-         profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
 
       if(trans.deal_entry == DEAL_ENTRY_IN)
       {
@@ -614,6 +599,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
       }
       else if(trans.deal_entry == DEAL_ENTRY_OUT)
       {
+         double profit = 0.0;
+         if(HistoryDealSelect(dealTicket))
+            profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
          PrintFormat("DEAL CLOSE %s %s @ %.2f P/L=%.2f", sym, (dealType==DEAL_TYPE_SELL?"SELL":"BUY"), price, profit);
          if(UsePushNotifications)
             SendNotification(StringFormat("Closed %s P/L %.2f", sym, profit));
