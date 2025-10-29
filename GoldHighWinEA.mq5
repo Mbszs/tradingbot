@@ -97,16 +97,18 @@ bool isAllowedTimeframe(ENUM_TIMEFRAMES tf)
 int countOpenPositionsForThisEA()
 {
    int count = 0;
-   int i;
-   for(i = 0; i < PositionsTotal(); i++)
+   int total = PositionsTotal();
+   int posIndex = 0;
+   while(posIndex < total)
    {
-      if(PositionSelectByIndex(i))
+      if(PositionSelectByIndex(posIndex))
       {
          string sym = PositionGetString(POSITION_SYMBOL);
          long   mg  = (long)PositionGetInteger(POSITION_MAGIC);
          if(sym == _Symbol && mg == (long)MagicNumber)
             count++;
       }
+      posIndex++;
    }
    return count;
 }
@@ -435,13 +437,13 @@ void manageTrailingStops()
    if(atr <= 0.0) return;
 
    int total = PositionsTotal();
-   int i;
-   for(i = 0; i < total; i++)
+   int posIndex = 0;
+   while(posIndex < total)
    {
-      if(!PositionSelectByIndex(i)) continue;
+      if(!PositionSelectByIndex(posIndex)) { posIndex++; continue; }
       string sym = PositionGetString(POSITION_SYMBOL);
       long   mg  = (long)PositionGetInteger(POSITION_MAGIC);
-      if(sym != _Symbol || mg != (long)MagicNumber) continue;
+      if(sym != _Symbol || mg != (long)MagicNumber) { posIndex++; continue; }
 
       long  type   = (long)PositionGetInteger(POSITION_TYPE);
       double sl    = PositionGetDouble(POSITION_SL);
@@ -474,6 +476,8 @@ void manageTrailingStops()
                trade.PositionModify(sym, newSL, tp);
          }
       }
+
+      posIndex++;
    }
 }
 
