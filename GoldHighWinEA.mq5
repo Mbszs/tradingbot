@@ -97,7 +97,8 @@ bool isAllowedTimeframe(ENUM_TIMEFRAMES tf)
 int countOpenPositionsForThisEA()
 {
    int count = 0;
-   for(int i = 0; i < PositionsTotal(); i++)
+   int i;
+   for(i = 0; i < PositionsTotal(); i++)
    {
       if(PositionSelectByIndex(i))
       {
@@ -216,7 +217,7 @@ bool computeDailyPivots(PivotLevels &p)
    return true;
 }
 
-bool nearAny(const double price, const double &levels[], const double maxDistance)
+bool nearAny(const double price, double &levels[], const double maxDistance)
 {
    int n = ArraySize(levels);
    for(int i = 0; i < n; i++)
@@ -434,7 +435,8 @@ void manageTrailingStops()
    if(atr <= 0.0) return;
 
    int total = PositionsTotal();
-   for(int i = 0; i < total; i++)
+   int i;
+   for(i = 0; i < total; i++)
    {
       if(!PositionSelectByIndex(i)) continue;
       string sym = PositionGetString(POSITION_SYMBOL);
@@ -583,12 +585,19 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
 {
    if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
    {
-      long   dealType   = (long)trans.deal_type;
-      string sym        = trans.symbol;
-      double price      = trans.price;
-      ulong  dealTicket = trans.deal;
+      ulong dealTicket = trans.deal;
+      if(dealTicket == 0)
+         return;
+      if(!HistoryDealSelect(dealTicket))
+         return;
 
-      if(trans.deal_entry == DEAL_ENTRY_IN)
+      long   dealType = (long)HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+      long   entry    = (long)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+      string sym      = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+      double price    = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+      double profit   = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+
+      if(entry == DEAL_ENTRY_IN)
       {
          if(dealType == DEAL_TYPE_BUY)
             PrintFormat("DEAL OPEN BUY %s @ %.2f", sym, price);
@@ -597,11 +606,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
          if(UsePushNotifications)
             SendNotification(StringFormat("Opened %s %s @ %.2f", (dealType==DEAL_TYPE_BUY?"BUY":"SELL"), sym, price));
       }
-      else if(trans.deal_entry == DEAL_ENTRY_OUT)
+      else if(entry == DEAL_ENTRY_OUT)
       {
-         double profit = 0.0;
-         if(HistoryDealSelect(dealTicket))
-            profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
          PrintFormat("DEAL CLOSE %s %s @ %.2f P/L=%.2f", sym, (dealType==DEAL_TYPE_SELL?"SELL":"BUY"), price, profit);
          if(UsePushNotifications)
             SendNotification(StringFormat("Closed %s P/L %.2f", sym, profit));
