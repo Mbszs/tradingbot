@@ -86,6 +86,21 @@ bool CopyTimeValue(ENUM_TIMEFRAMES tf, int shift, datetime &out)
    return true;
 }
 
+// Determine the number of decimal digits required by a step size (up to 8 digits)
+int CountStepDigits(double step)
+{
+   if(step <= 0.0) return 2;
+   int digits = 0;
+   double v = step;
+   // increase precision until v is (almost) an integer or we hit a reasonable cap
+   while(digits < 8 && MathAbs(v - MathRound(v)) > 1e-12)
+   {
+      v *= 10.0;
+      digits++;
+   }
+   return digits;
+}
+
 // Rounds volume down to the nearest step, clamped to [min,max]
 double NormalizeVolumeToStep(double volume)
 {
@@ -97,18 +112,19 @@ double NormalizeVolumeToStep(double volume)
    double v = steps * step;
    if(v < minv) v = minv;
    if(v > maxv) v = maxv;
-   // normalize to step precision
-   int stepDigits = (int)MathRound(MathLog10(1.0/step));
+   int stepDigits = CountStepDigits(step);
    return NormalizeDouble(v, MathMax(0, stepDigits));
 }
 
-// Ensures price is aligned to tick size
+// Ensures price is aligned to tick size and symbol digits
 double NormalizePrice(double price)
 {
    double tick = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    if(tick <= 0.0) tick = _Point;
-   int digits = (int)MathRound(MathLog10(1.0/tick));
-   return NormalizeDouble(price, MathMax(0, digits));
+   double n = MathRound(price / tick);
+   double aligned = n * tick;
+   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   return NormalizeDouble(aligned, MathMax(0, digits));
 }
 
 // ============================
