@@ -1,4 +1,3 @@
-#property strict
 #property description "Trend-following EA with H1 EMA bias, M15 confirmations, ATR SL and trailing"
 #property version   "1.0.0"
 #property copyright ""
@@ -89,7 +88,10 @@ bool CopyTimeValue(ENUM_TIMEFRAMES tf, int shift, datetime &out)
 // Rounding helper to avoid MathRound dependency in older terminals
 double RoundNearest(double x)
 {
-   return (x >= 0.0 ? MathFloor(x + 0.5) : MathCeil(x - 0.5));
+   // round half away from zero using only floor
+   double ax = (x >= 0.0 ? x : -x);
+   double r = MathFloor(ax + 0.5);
+   return (x >= 0.0 ? r : -r);
 }
 
 // Determine the number of decimal digits required by a step size (up to 8 digits)
