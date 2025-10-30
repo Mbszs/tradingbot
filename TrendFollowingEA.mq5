@@ -5,10 +5,11 @@
 //+------------------------------------------------------------------+
 #property copyright "TrendFollowing EA 2025"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property strict
-#property description "Fixed: Zero trades issue - RSI now uses relaxed momentum mode"
-#property description "Added: Debug logging system for troubleshooting"
+#property description "No stop loss - Manual exit only"
+#property description "Session filters with strong trend override"
+#property description "No circuit breaker - Permanent trading mode"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -40,18 +41,32 @@ input bool Strict_RSI_Cross = false; // Require exact RSI crossover (strict)
 // === Risk Management ===
 input group "=== Risk Management ==="
 input double Risk_Per_Trade = 0.5;  // Risk % per trade (0.5 = 0.5%)
+input double Fixed_Lot_Size = 0.0;  // Fixed lot size (0 = auto calculate)
+input bool Use_Stop_Loss = false;   // Use stop loss (NOT RECOMMENDED)
 input int ATR_Period = 14;          // ATR Period
-input double ATR_Multiplier_ISL = 2.0;  // ATR Multiplier for Initial Stop Loss
+input double ATR_Multiplier_ISL = 2.0;  // ATR Multiplier for Initial Stop Loss (if enabled)
+input bool Use_Trailing_Stop = false; // Use trailing stop
 input double ATR_Multiplier_Trail = 1.0; // ATR Multiplier for Trailing Stop
-input double ATR_Profit_Activation = 1.0; // ATR profit to activate trailing stop
-input bool Use_Aggressive_Trail = true;   // Tighten trail on big profits
-input double ATR_Aggressive_Threshold = 3.0; // ATR profit for aggressive trail
-input double ATR_Aggressive_Multiplier = 0.5; // Aggressive trail multiplier
 
-// === Circuit Breaker ===
-input group "=== Circuit Breaker ==="
-input double Max_Drawdown_Percent = 10.0; // Max Drawdown % before shutdown
-input bool Enable_Circuit_Breaker = true;  // Enable Circuit Breaker
+// === Exit Management ===
+input group "=== Exit Management ==="
+input bool Exit_On_Opposite_Signal = true;  // Close on opposite entry signal
+input bool Exit_On_EMA_Cross = true;        // Close when price crosses 21 EMA opposite
+input bool Exit_On_Trend_Change = false;    // Close when H1 trend changes
+
+// === Trading Sessions ===
+input group "=== Trading Sessions ==="
+input bool Use_Session_Filter = true;       // Enable session filter
+input bool Trade_Asian_Session = false;     // Trade Asian session (00:00-09:00 GMT)
+input bool Trade_London_Session = true;     // Trade London session (08:00-17:00 GMT)
+input bool Trade_NewYork_Session = true;    // Trade New York session (13:00-22:00 GMT)
+input bool Override_On_Strong_Trend = true; // Trade anytime if strong trend detected
+input double Strong_Trend_ADX_Level = 25.0; // ADX level for strong trend
+
+// === Circuit Breaker (Optional) ===
+input group "=== Circuit Breaker (Disabled by Default) ==="
+input bool Enable_Circuit_Breaker = false;  // Enable Circuit Breaker
+input double Max_Drawdown_Percent = 20.0;   // Max Drawdown % before shutdown
 
 // === General Settings ===
 input group "=== General Settings ==="
@@ -85,6 +100,9 @@ int m15_ema34_handle;
 int m15_macd_handle;
 int m15_rsi_handle;
 
+// Indicator handles (H1)
+int h1_adx_handle;
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
@@ -112,21 +130,28 @@ int OnInit()
     m15_ema34_handle = iMA(_Symbol, PERIOD_M15, MA_Period_3, 0, MODE_EMA, PRICE_CLOSE);
     m15_macd_handle = iMACD(_Symbol, PERIOD_M15, MACD_Fast, MACD_Slow, MACD_Signal, PRICE_CLOSE);
     m15_rsi_handle = iRSI(_Symbol, PERIOD_M15, RSI_Period, PRICE_CLOSE);
+    h1_adx_handle = iADX(_Symbol, PERIOD_H1, 14);
     
     // Validate handles
     if(h1_ema8_handle == INVALID_HANDLE || h1_ema21_handle == INVALID_HANDLE ||
        h1_ema34_handle == INVALID_HANDLE || h1_ema55_handle == INVALID_HANDLE ||
-       h1_atr_handle == INVALID_HANDLE || m15_ema8_handle == INVALID_HANDLE ||
-       m15_ema21_handle == INVALID_HANDLE || m15_ema34_handle == INVALID_HANDLE ||
-       m15_macd_handle == INVALID_HANDLE || m15_rsi_handle == INVALID_HANDLE)
+       h1_atr_handle == INVALID_HANDLE || h1_adx_handle == INVALID_HANDLE ||
+       m15_ema8_handle == INVALID_HANDLE || m15_ema21_handle == INVALID_HANDLE ||
+       m15_ema34_handle == INVALID_HANDLE || m15_macd_handle == INVALID_HANDLE ||
+       m15_rsi_handle == INVALID_HANDLE)
     {
         Print("ERROR: Failed to create indicator handles!");
         return(INIT_FAILED);
     }
     
-    Print("TrendFollowing EA initialized successfully");
-    Print("Risk per trade: ", Risk_Per_Trade, "%");
-    Print("Max Drawdown: ", Max_Drawdown_Percent, "%");
+    Print("TrendFollowing EA v1.02 initialized successfully");
+    Print("Mode: NO STOP LOSS - Manual exits only");
+    Print("Session Filter: ", Use_Session_Filter ? "ENABLED" : "DISABLED");
+    Print("Circuit Breaker: ", Enable_Circuit_Breaker ? "ENABLED" : "DISABLED");
+    if(Fixed_Lot_Size > 0)
+        Print("Using fixed lot size: ", Fixed_Lot_Size);
+    else
+        Print("Using calculated lot size: ", Risk_Per_Trade, "% risk per trade");
     
     return(INIT_SUCCEEDED);
 }
@@ -147,6 +172,7 @@ void OnDeinit(const int reason)
     IndicatorRelease(m15_ema34_handle);
     IndicatorRelease(m15_macd_handle);
     IndicatorRelease(m15_rsi_handle);
+    IndicatorRelease(h1_adx_handle);
     
     Print("TrendFollowing EA deinitialized. Reason: ", reason);
 }
@@ -171,12 +197,24 @@ void OnTick()
         }
     }
     
-    // Manage existing positions (trailing stop)
-    ManageOpenPositions();
+    // Check for manual exit conditions on existing positions
+    CheckManualExits();
+    
+    // Manage existing positions (trailing stop if enabled)
+    if(Use_Trailing_Stop)
+        ManageOpenPositions();
     
     // Check if we already have an open position (one trade at a time rule)
     if(HasOpenPosition())
         return;
+    
+    // Check if we can trade (session filter)
+    if(!CanTradeNow())
+    {
+        if(Enable_Debug_Logging)
+            Print("[DEBUG] Outside trading session - waiting");
+        return;
+    }
     
     // Analyze market and execute trades
     AnalyzeAndTrade();
@@ -292,6 +330,159 @@ int GetH1TrendBias()
     }
     
     return 0; // No clear trend
+}
+
+//+------------------------------------------------------------------+
+//| Check if strong trend exists (for session override)              |
+//+------------------------------------------------------------------+
+bool IsStrongTrend()
+{
+    if(!Override_On_Strong_Trend)
+        return false;
+    
+    double adx[];
+    ArraySetAsSeries(adx, true);
+    
+    if(CopyBuffer(h1_adx_handle, 0, 0, 2, adx) <= 0)
+        return false;
+    
+    bool strongTrend = adx[0] >= Strong_Trend_ADX_Level;
+    
+    if(Enable_Debug_Logging && strongTrend)
+        Print("[DEBUG] Strong trend detected: ADX = ", adx[0]);
+    
+    return strongTrend;
+}
+
+//+------------------------------------------------------------------+
+//| Check if we can trade based on session                           |
+//+------------------------------------------------------------------+
+bool CanTradeNow()
+{
+    if(!Use_Session_Filter)
+        return true;
+    
+    // Check if strong trend overrides session filter
+    if(IsStrongTrend())
+    {
+        if(Enable_Debug_Logging)
+            Print("[DEBUG] Strong trend - session filter bypassed");
+        return true;
+    }
+    
+    // Get current GMT time
+    datetime currentTime = TimeGMT();
+    MqlDateTime dt;
+    TimeToStruct(currentTime, dt);
+    
+    int currentHour = dt.hour;
+    
+    // Asian Session: 00:00 - 09:00 GMT
+    if(Trade_Asian_Session && currentHour >= 0 && currentHour < 9)
+        return true;
+    
+    // London Session: 08:00 - 17:00 GMT
+    if(Trade_London_Session && currentHour >= 8 && currentHour < 17)
+        return true;
+    
+    // New York Session: 13:00 - 22:00 GMT
+    if(Trade_NewYork_Session && currentHour >= 13 && currentHour < 22)
+        return true;
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Check manual exit conditions                                     |
+//+------------------------------------------------------------------+
+void CheckManualExits()
+{
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        if(!positionInfo.SelectByIndex(i))
+            continue;
+            
+        if(positionInfo.Symbol() != _Symbol || positionInfo.Magic() != Magic_Number)
+            continue;
+        
+        bool shouldExit = false;
+        string exitReason = "";
+        
+        ENUM_POSITION_TYPE posType = positionInfo.Type();
+        
+        // Exit on opposite signal
+        if(Exit_On_Opposite_Signal)
+        {
+            if(posType == POSITION_TYPE_BUY && CheckM15SellEntry())
+            {
+                shouldExit = true;
+                exitReason = "Opposite SELL signal detected";
+            }
+            else if(posType == POSITION_TYPE_SELL && CheckM15BuyEntry())
+            {
+                shouldExit = true;
+                exitReason = "Opposite BUY signal detected";
+            }
+        }
+        
+        // Exit on EMA cross
+        if(Exit_On_EMA_Cross && !shouldExit)
+        {
+            double ema21[], close[];
+            ArraySetAsSeries(ema21, true);
+            ArraySetAsSeries(close, true);
+            
+            if(CopyBuffer(m15_ema21_handle, 0, 0, 3, ema21) > 0 &&
+               CopyClose(_Symbol, PERIOD_M15, 0, 3, close) > 0)
+            {
+                if(posType == POSITION_TYPE_BUY && close[0] < ema21[0] && close[1] >= ema21[1])
+                {
+                    shouldExit = true;
+                    exitReason = "Price crossed below 21 EMA";
+                }
+                else if(posType == POSITION_TYPE_SELL && close[0] > ema21[0] && close[1] <= ema21[1])
+                {
+                    shouldExit = true;
+                    exitReason = "Price crossed above 21 EMA";
+                }
+            }
+        }
+        
+        // Exit on H1 trend change
+        if(Exit_On_Trend_Change && !shouldExit)
+        {
+            int currentTrendBias = GetH1TrendBias();
+            
+            if(posType == POSITION_TYPE_BUY && currentTrendBias == -1)
+            {
+                shouldExit = true;
+                exitReason = "H1 trend changed to BEARISH";
+            }
+            else if(posType == POSITION_TYPE_SELL && currentTrendBias == 1)
+            {
+                shouldExit = true;
+                exitReason = "H1 trend changed to BULLISH";
+            }
+        }
+        
+        // Execute exit
+        if(shouldExit)
+        {
+            Print("=== MANUAL EXIT ===");
+            Print("Reason: ", exitReason);
+            Print("Position: ", posType == POSITION_TYPE_BUY ? "BUY" : "SELL");
+            Print("Ticket: ", positionInfo.Ticket());
+            
+            if(trade.PositionClose(positionInfo.Ticket()))
+            {
+                Print("Position closed successfully");
+            }
+            else
+            {
+                Print("ERROR: Failed to close position. Code: ", trade.ResultRetcode());
+            }
+        }
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -519,13 +710,27 @@ double GetH1ATR()
 }
 
 //+------------------------------------------------------------------+
-//| Calculate position size based on risk                            |
+//| Calculate position size                                          |
 //+------------------------------------------------------------------+
-double CalculatePositionSize(double stopLossDistance)
+double CalculatePositionSize()
 {
-    if(stopLossDistance <= 0)
-        return 0;
+    // Use fixed lot size if specified
+    if(Fixed_Lot_Size > 0)
+    {
+        double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+        double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+        double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+        
+        double lots = Fixed_Lot_Size;
+        lots = MathFloor(lots / lotStep) * lotStep;
+        
+        if(lots < minLot) lots = minLot;
+        if(lots > maxLot) lots = maxLot;
+        
+        return lots;
+    }
     
+    // Calculate based on account balance percentage
     double accountBalance = accountInfo.Balance();
     double riskAmount = accountBalance * (Risk_Per_Trade / 100.0);
     
@@ -535,8 +740,14 @@ double CalculatePositionSize(double stopLossDistance)
     double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
     double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
     
+    // Use ATR as reference for position sizing
+    double atr = GetH1ATR();
+    if(atr <= 0) atr = 10.0; // Default fallback
+    
+    double referenceDistance = atr * 2.0; // 2x ATR as reference
+    
     // Calculate lot size
-    double lots = (riskAmount / (stopLossDistance / tickSize * tickValue));
+    double lots = (riskAmount / (referenceDistance / tickSize * tickValue));
     
     // Normalize to lot step
     lots = MathFloor(lots / lotStep) * lotStep;
@@ -588,18 +799,30 @@ void AnalyzeAndTrade()
             Print("[DEBUG] M15 Buy Entry Check: ", buySignal ? "PASSED" : "FAILED");
         
         if(buySignal)
-    {
-        double sl = bid - (ATR_Multiplier_ISL * atr);
-        double slDistance = bid - sl;
-        double lotSize = CalculatePositionSize(slDistance);
+        {
+        double lotSize = CalculatePositionSize();
         
         if(lotSize > 0)
         {
-            Print("=== BUY SIGNAL ===");
-            Print("Entry: ", ask, " | SL: ", sl, " | Lot: ", lotSize);
-            Print("ATR: ", atr, " | SL Distance: ", slDistance);
+            double sl = 0;
+            double tp = 0;
             
-            if(trade.Buy(lotSize, _Symbol, ask, sl, 0, Trade_Comment))
+            // Set stop loss only if enabled
+            if(Use_Stop_Loss)
+            {
+                sl = bid - (ATR_Multiplier_ISL * atr);
+                Print("=== BUY SIGNAL (WITH SL) ===");
+                Print("Entry: ", ask, " | SL: ", sl, " | Lot: ", lotSize);
+            }
+            else
+            {
+                Print("=== BUY SIGNAL (NO SL - MANUAL EXIT) ===");
+                Print("Entry: ", ask, " | Lot: ", lotSize, " | Manual exit enabled");
+            }
+            
+            Print("ATR: ", atr);
+            
+            if(trade.Buy(lotSize, _Symbol, ask, sl, tp, Trade_Comment))
             {
                 Print("BUY order executed successfully. Ticket: ", trade.ResultOrder());
             }
@@ -618,18 +841,30 @@ void AnalyzeAndTrade()
             Print("[DEBUG] M15 Sell Entry Check: ", sellSignal ? "PASSED" : "FAILED");
         
         if(sellSignal)
-    {
-        double sl = ask + (ATR_Multiplier_ISL * atr);
-        double slDistance = sl - ask;
-        double lotSize = CalculatePositionSize(slDistance);
+        {
+        double lotSize = CalculatePositionSize();
         
         if(lotSize > 0)
         {
-            Print("=== SELL SIGNAL ===");
-            Print("Entry: ", bid, " | SL: ", sl, " | Lot: ", lotSize);
-            Print("ATR: ", atr, " | SL Distance: ", slDistance);
+            double sl = 0;
+            double tp = 0;
             
-            if(trade.Sell(lotSize, _Symbol, bid, sl, 0, Trade_Comment))
+            // Set stop loss only if enabled
+            if(Use_Stop_Loss)
+            {
+                sl = ask + (ATR_Multiplier_ISL * atr);
+                Print("=== SELL SIGNAL (WITH SL) ===");
+                Print("Entry: ", bid, " | SL: ", sl, " | Lot: ", lotSize);
+            }
+            else
+            {
+                Print("=== SELL SIGNAL (NO SL - MANUAL EXIT) ===");
+                Print("Entry: ", bid, " | Lot: ", lotSize, " | Manual exit enabled");
+            }
+            
+            Print("ATR: ", atr);
+            
+            if(trade.Sell(lotSize, _Symbol, bid, sl, tp, Trade_Comment))
             {
                 Print("SELL order executed successfully. Ticket: ", trade.ResultOrder());
             }

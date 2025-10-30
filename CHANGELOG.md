@@ -5,6 +5,165 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.02] - 2025-10-30 (MAJOR CHANGES - NO STOP LOSS MODE)
+
+### 🚨 CRITICAL CHANGES - High Risk Approach
+
+**COMPLETE REDESIGN based on user request:**
+- Removed stop loss requirement (trades without SL by default)
+- Disabled circuit breaker by default (permanent trading)
+- Added session filters (London + NY default)
+- Added strong trend detection for session override
+- Implemented manual exit system
+
+### ✨ New Features
+
+**1. No Stop Loss Mode**
+- `Use_Stop_Loss = false` (default)
+- Trades open without hard stop
+- Relies on manual exit conditions
+- **WARNING: High risk - can result in large losses**
+
+**2. Manual Exit System**
+Three automatic exit conditions:
+- `Exit_On_Opposite_Signal = true` - Close when opposite entry appears
+- `Exit_On_EMA_Cross = true` - Close when price crosses 21 EMA opposite direction
+- `Exit_On_Trend_Change = false` - Close when H1 trend changes (optional)
+
+**3. Trading Session Filters**
+- Asian Session (00:00-09:00 GMT) - Disabled by default
+- London Session (08:00-17:00 GMT) - Enabled
+- New York Session (13:00-22:00 GMT) - Enabled
+- Only trades during enabled sessions
+
+**4. Strong Trend Override**
+- `Override_On_Strong_Trend = true`
+- If ADX >= 25 (configurable), trades anytime regardless of session
+- Ensures big trending moves aren't missed
+
+**5. Fixed Lot Size Option**
+- `Fixed_Lot_Size = 0.0` (0 = auto calculate based on % risk)
+- Set to specific value (e.g., 0.01, 0.1) for fixed position sizing
+
+**6. Optional Trailing Stop**
+- `Use_Trailing_Stop = false` (disabled by default)
+- Can enable if desired
+
+### 📝 New Parameters
+
+```mql5
+// Risk Management
+input bool Use_Stop_Loss = false;           // Enable stop loss (disabled)
+input double Fixed_Lot_Size = 0.0;          // Fixed lot or 0 for auto
+input bool Use_Trailing_Stop = false;      // Enable trailing stop
+
+// Exit Management
+input bool Exit_On_Opposite_Signal = true; // Close on opposite signal
+input bool Exit_On_EMA_Cross = true;       // Close on EMA cross
+input bool Exit_On_Trend_Change = false;   // Close on trend change
+
+// Trading Sessions
+input bool Use_Session_Filter = true;      // Enable session filter
+input bool Trade_Asian_Session = false;    // Trade Asian 00:00-09:00
+input bool Trade_London_Session = true;    // Trade London 08:00-17:00
+input bool Trade_NewYork_Session = true;   // Trade NY 13:00-22:00
+input bool Override_On_Strong_Trend = true;// Trade anytime if ADX >= threshold
+input double Strong_Trend_ADX_Level = 25.0;// ADX level for strong trend
+
+// Circuit Breaker (Now Optional)
+input bool Enable_Circuit_Breaker = false; // DISABLED by default
+input double Max_Drawdown_Percent = 20.0;  // Higher threshold
+```
+
+### 🎯 Default Behavior
+
+**Entries:**
+- H1 trend alignment (unchanged)
+- M15 entry signals (unchanged)
+- **Session filter:** Only London + NY sessions
+- **Strong trend override:** Trades anytime if ADX >= 25
+
+**Exits:**
+- **No stop loss** on entry
+- Exit when opposite signal detected
+- Exit when price crosses 21 EMA opposite
+- Optional: Exit when H1 trend changes
+
+**Risk:**
+- No circuit breaker by default (permanent trading)
+- Can lose unlimited on single trade (no SL)
+- Manual exits may be slow
+- **Very high risk** approach
+
+### ⚠️ CRITICAL WARNINGS
+
+1. **No Stop Loss = Unlimited Risk**
+   - Single trade can cause massive loss
+   - News events, gaps extremely dangerous
+   - **NOT for beginners**
+   - **MUST test on demo first**
+
+2. **Circuit Breaker Disabled**
+   - EA will never auto-shutdown
+   - Can lead to complete account loss
+   - **Strongly recommend** enabling with 15-20% threshold
+
+3. **Manual Exits Can Be Slow**
+   - Exits check every M15 bar
+   - Fast moves may cause large losses before exit
+   - Consider keeping a safety SL
+
+4. **Session Filter Important**
+   - Reduces low-liquidity trading
+   - Strong trend override catches big moves
+   - Verify GMT offset matches your broker
+
+### 📚 Documentation Updates
+
+- `VERSION_1.02_CHANGES.md` - Comprehensive guide to new version
+- `CHANGELOG.md` - This file
+- Existing docs still valid for general strategy
+
+### 🔄 Migration from v1.01
+
+**To restore v1.01 behavior:**
+```
+Use_Stop_Loss = true
+Use_Trailing_Stop = true
+Use_Session_Filter = false
+Enable_Circuit_Breaker = true
+Max_Drawdown_Percent = 10.0
+Exit_On_Opposite_Signal = false
+Exit_On_EMA_Cross = false
+```
+
+### 🎓 Use Cases
+
+**Who Should Use v1.02:**
+- Experienced traders comfortable with high risk
+- Those wanting maximum profit potential
+- Traders who can monitor positions closely
+- Those with manual intervention plan
+
+**Who Should NOT Use v1.02:**
+- Beginners
+- Conservative traders
+- Those who can't monitor 24/7
+- Anyone uncomfortable with large drawdowns
+
+### ✅ Testing Recommendations
+
+1. **Start with demo** (mandatory)
+2. Use `Fixed_Lot_Size = 0.01` (minimum)
+3. Keep `Enable_Circuit_Breaker = true` initially
+4. Enable `Enable_Debug_Logging = true`
+5. Monitor maximum drawdown closely
+6. Review every trade manually
+7. Test for minimum 2 weeks demo
+8. Only go live with extreme caution
+
+---
+
 ## [1.01] - 2025-10-30 (CRITICAL FIX)
 
 ### 🔧 Critical Bug Fix
