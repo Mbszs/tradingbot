@@ -5,10 +5,10 @@
 //+------------------------------------------------------------------+
 #property copyright "TrendFollowing EA 2025"
 #property link      ""
-#property version   "1.02"
-#property description "No stop loss - Manual exit only"
-#property description "Session filters with strong trend override"
-#property description "No circuit breaker - Permanent trading mode"
+#property version   "1.03"
+#property description "HEAVY PROTECTION MODE - After 50% Loss Recovery"
+#property description "8 Layers of Protection: Volatility, Spread, News, Daily Limits"
+#property description "Ultra-Safe: 0.1% risk, Max 3 trades/day, 2% daily loss limit"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -37,23 +37,29 @@ input int RSI_Period = 14;          // RSI Period
 input double RSI_Level = 50.0;      // RSI Level for Momentum
 input bool Strict_RSI_Cross = false; // Require exact RSI crossover (strict)
 
-// === Risk Management ===
-sinput group "=== Risk Management ==="
-input double Risk_Per_Trade = 0.3;  // Risk % per trade (CONSERVATIVE for smooth equity)
+// === Risk Management (ULTRA-SAFE AFTER 50% LOSS) ===
+sinput group "=== Risk Management (ULTRA-SAFE AFTER 50% LOSS) ==="
+input double Risk_Per_Trade = 0.1;  // Risk % per trade (ULTRA LOW - was 0.3%)
 input double Fixed_Lot_Size = 0.0;  // Fixed lot size (0 = auto calculate)
 input bool Use_Stop_Loss = true;    // Use stop loss (ENABLED for protection)
 input int ATR_Period = 14;          // ATR Period
-input double ATR_Multiplier_ISL = 1.5;  // ATR Multiplier for Initial Stop Loss (tight)
+input double ATR_Multiplier_ISL = 2.0;  // ATR Multiplier for Initial Stop Loss (WIDER - was 1.5)
 input bool Use_Trailing_Stop = true;  // Use trailing stop (ENABLED)
-input double ATR_Multiplier_Trail = 0.8; // ATR Multiplier for Trailing Stop (tight)
+input double ATR_Multiplier_Trail = 1.0; // ATR Multiplier for Trailing Stop (LOOSER - was 0.8)
 input bool Use_Take_Profit = true;   // Use take profit levels
-input double ATR_Multiplier_TP = 3.0; // ATR Multiplier for Take Profit
+input double ATR_Multiplier_TP = 4.0; // ATR Multiplier for Take Profit (WIDER - was 3.0)
 input bool Move_SL_To_Breakeven = true; // Move SL to break-even at profit
-input double Breakeven_Trigger_ATR = 1.0; // ATR profit to trigger break-even
-input double ATR_Profit_Activation = 1.0; // ATR profit to activate trailing stop
+input double Breakeven_Trigger_ATR = 1.5; // ATR profit to trigger break-even (HIGHER - was 1.0)
+input double ATR_Profit_Activation = 1.5; // ATR profit to activate trailing stop
 input bool Use_Aggressive_Trail = false; // Tighten trail on big profits
 input double ATR_Aggressive_Threshold = 3.0; // ATR profit for aggressive trail
 input double ATR_Aggressive_Multiplier = 0.5; // Aggressive trail multiplier
+
+// === Daily Loss Protection (NEW) ===
+sinput group "=== Daily Loss Protection (NEW) ==="
+input bool Enable_Daily_Loss_Limit = true;   // Enable daily loss limit
+input double Max_Daily_Loss_Percent = 2.0;   // Max daily loss % (stops trading for the day)
+input int Max_Trades_Per_Day = 3;            // Max trades per day (prevents overtrading)
 
 // === Exit Management ===
 sinput group "=== Exit Management ==="
@@ -70,10 +76,20 @@ input bool Trade_NewYork_Session = true;    // Trade New York session (13:00-22:
 input bool Override_On_Strong_Trend = true; // Trade anytime if strong trend detected
 input double Strong_Trend_ADX_Level = 25.0; // ADX level for strong trend
 
+// === Volatility & News Protection (NEW - CRITICAL) ===
+sinput group "=== Volatility & News Protection (NEW - CRITICAL) ==="
+input bool Enable_Volatility_Filter = true;  // Don't trade during volatility spikes
+input double Max_ATR_Multiplier = 1.5;       // Max ATR vs 20-period average (1.5 = 50% higher)
+input bool Enable_Spread_Filter = true;      // Don't trade during wide spreads
+input double Max_Spread_Points = 30.0;       // Max spread in points for XAUUSD
+input bool Avoid_News_Times = true;          // Avoid major news event times
+input int News_Avoid_Hours_Before = 1;       // Hours before news to avoid
+input int News_Avoid_Hours_After = 2;        // Hours after news to avoid
+
 // === Circuit Breaker (Optional Protection) ===
 sinput group "=== Circuit Breaker (Optional Protection) ==="
-input bool Enable_Circuit_Breaker = false;  // Enable Circuit Breaker (DISABLED by user)
-input double Max_Drawdown_Percent = 8.0;    // Max Drawdown % (if enabled)
+input bool Enable_Circuit_Breaker = true;    // Enable Circuit Breaker (RE-ENABLED)
+input double Max_Drawdown_Percent = 5.0;     // Max Drawdown % (TIGHTER - was 8%)
 
 // === General Settings ===
 sinput group "=== General Settings ==="
@@ -93,12 +109,19 @@ datetime lastBarTime = 0;           // For new bar detection
 double peakEquity = 0.0;            // Track peak equity for drawdown
 bool circuitBreakerTriggered = false; // Circuit breaker status
 
+// Daily loss tracking (NEW - v1.03)
+double dailyStartEquity = 0;
+datetime lastResetDate = 0;
+int dailyTradeCount = 0;
+bool dailyLossLimitHit = false;
+
 // Indicator handles (H1)
 int h1_ema8_handle;
 int h1_ema21_handle;
 int h1_ema34_handle;
 int h1_ema55_handle;
 int h1_atr_handle;
+int h1_atr_longterm_handle; // For ATR average comparison (volatility filter)
 
 // Indicator handles (M15)
 int m15_ema8_handle;
@@ -130,6 +153,7 @@ int OnInit()
     h1_ema34_handle = iMA(_Symbol, PERIOD_H1, MA_Period_3, 0, MODE_EMA, PRICE_CLOSE);
     h1_ema55_handle = iMA(_Symbol, PERIOD_H1, MA_Period_4, 0, MODE_EMA, PRICE_CLOSE);
     h1_atr_handle = iATR(_Symbol, PERIOD_H1, ATR_Period);
+    h1_atr_longterm_handle = iATR(_Symbol, PERIOD_H1, 20); // For volatility comparison
     
     // Create M15 indicator handles
     m15_ema8_handle = iMA(_Symbol, PERIOD_M15, MA_Period_1, 0, MODE_EMA, PRICE_CLOSE);
@@ -142,27 +166,36 @@ int OnInit()
     // Validate handles
     if(h1_ema8_handle == INVALID_HANDLE || h1_ema21_handle == INVALID_HANDLE ||
        h1_ema34_handle == INVALID_HANDLE || h1_ema55_handle == INVALID_HANDLE ||
-       h1_atr_handle == INVALID_HANDLE || h1_adx_handle == INVALID_HANDLE ||
-       m15_ema8_handle == INVALID_HANDLE || m15_ema21_handle == INVALID_HANDLE ||
-       m15_ema34_handle == INVALID_HANDLE || m15_macd_handle == INVALID_HANDLE ||
-       m15_rsi_handle == INVALID_HANDLE)
+       h1_atr_handle == INVALID_HANDLE || h1_atr_longterm_handle == INVALID_HANDLE ||
+       h1_adx_handle == INVALID_HANDLE || m15_ema8_handle == INVALID_HANDLE || 
+       m15_ema21_handle == INVALID_HANDLE || m15_ema34_handle == INVALID_HANDLE || 
+       m15_macd_handle == INVALID_HANDLE || m15_rsi_handle == INVALID_HANDLE)
     {
         Print("ERROR: Failed to create indicator handles!");
         return(INIT_FAILED);
     }
     
-    Print("TrendFollowing EA v1.02 initialized successfully");
-    Print("Mode: NO STOP LOSS - Manual exits only");
-    Print("Session Filter: ", Use_Session_Filter ? "ENABLED" : "DISABLED");
-    if(Enable_Circuit_Breaker)
-        Print("Circuit Breaker: ENABLED at ", Max_Drawdown_Percent, "%");
-    else
-        Print("Circuit Breaker: DISABLED - No drawdown limit");
-    Print("Mode: CONSERVATIVE - Stop Loss, Take Profit, Break-Even protection enabled");
-    if(Fixed_Lot_Size > 0)
-        Print("Using fixed lot size: ", Fixed_Lot_Size);
-    else
-        Print("Using calculated lot size: ", Risk_Per_Trade, "% risk per trade");
+    // Initialize daily tracking
+    dailyStartEquity = accountInfo.Equity();
+    lastResetDate = TimeCurrent();
+    dailyTradeCount = 0;
+    dailyLossLimitHit = false;
+    
+    Print("========================================");
+    Print("TrendFollowing EA v1.03 - HEAVY PROTECTION MODE");
+    Print("========================================");
+    Print("⚠️ ULTRA-SAFE Settings Applied After 50% Loss:");
+    Print("- Risk per trade: ", Risk_Per_Trade, "% (ULTRA LOW)");
+    Print("- Stop Loss: ", ATR_Multiplier_ISL, " ATR (WIDER for breathing room)");
+    Print("- Take Profit: ", ATR_Multiplier_TP, " ATR (WIDER targets)");
+    Print("- Daily Loss Limit: ", Max_Daily_Loss_Percent, "% (NEW - stops daily trading)");
+    Print("- Max Trades/Day: ", Max_Trades_Per_Day, " (NEW - prevents overtrading)");
+    Print("- Volatility Filter: ", Enable_Volatility_Filter ? "ON" : "OFF", " (NEW - avoids news spikes)");
+    Print("- Spread Filter: ", Enable_Spread_Filter ? "ON" : "OFF", " (max ", Max_Spread_Points, " pts)");
+    Print("- News Avoidance: ", Avoid_News_Times ? "ON" : "OFF", " (±", News_Avoid_Hours_Before, "-", News_Avoid_Hours_After, "hrs)");
+    Print("- Circuit Breaker: ", Enable_Circuit_Breaker ? "ON" : "OFF", " at ", Max_Drawdown_Percent, "%");
+    Print("- Position Sizing: $500 = 0.01 lot");
+    Print("========================================");
     
     return(INIT_SUCCEEDED);
 }
@@ -184,8 +217,9 @@ void OnDeinit(const int reason)
     IndicatorRelease(m15_macd_handle);
     IndicatorRelease(m15_rsi_handle);
     IndicatorRelease(h1_adx_handle);
+    IndicatorRelease(h1_atr_longterm_handle);
     
-    Print("TrendFollowing EA deinitialized. Reason: ", reason);
+    Print("TrendFollowing EA v1.03 deinitialized. Reason: ", reason);
 }
 
 //+------------------------------------------------------------------+
@@ -193,9 +227,28 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-    // Check for new M15 bar
-    if(!IsNewBar())
+    // Reset daily tracking at start of new day (NEW - v1.03)
+    CheckDailyReset();
+    
+    // Check daily loss limit (NEW - v1.03)
+    if(Enable_Daily_Loss_Limit && CheckDailyLossLimit())
+    {
+        if(!dailyLossLimitHit)
+        {
+            Print("⚠️ DAILY LOSS LIMIT HIT - No more trading today!");
+            Print("Daily loss: ", DoubleToString(GetDailyLossPercent(), 2), "%");
+            dailyLossLimitHit = true;
+        }
+        return; // Stop trading for today
+    }
+    
+    // Check max trades per day (NEW - v1.03)
+    if(dailyTradeCount >= Max_Trades_Per_Day)
+    {
+        if(Enable_Debug_Logging)
+            Print("[PROTECTION] Max trades per day reached: ", dailyTradeCount);
         return;
+    }
     
     // Check circuit breaker
     if(Enable_Circuit_Breaker)
@@ -208,12 +261,40 @@ void OnTick()
         }
     }
     
+    // Check for new M15 bar
+    if(!IsNewBar())
+        return;
+    
     // Check for manual exit conditions on existing positions
     CheckManualExits();
     
     // Manage existing positions (trailing stop if enabled)
     if(Use_Trailing_Stop)
         ManageOpenPositions();
+    
+    // Check volatility filter BEFORE opening new trades (NEW - v1.03)
+    if(Enable_Volatility_Filter && !PassVolatilityFilter())
+    {
+        if(Enable_Debug_Logging)
+            Print("[PROTECTION] Volatility too high - NEWS SPIKE DETECTED!");
+        return;
+    }
+    
+    // Check spread filter (NEW - v1.03)
+    if(Enable_Spread_Filter && !PassSpreadFilter())
+    {
+        if(Enable_Debug_Logging)
+            Print("[PROTECTION] Spread too wide - avoiding trade");
+        return;
+    }
+    
+    // Check news times (NEW - v1.03)
+    if(Avoid_News_Times && !PassNewsFilter())
+    {
+        if(Enable_Debug_Logging)
+            Print("[PROTECTION] Near major news time - avoiding trade");
+        return;
+    }
     
     // Check if we already have an open position (one trade at a time rule)
     if(HasOpenPosition())
@@ -306,6 +387,182 @@ void CloseAllPositions()
             }
         }
     }
+}
+
+//+------------------------------------------------------------------+
+//| Check and reset daily tracking (NEW - v1.03)                     |
+//+------------------------------------------------------------------+
+void CheckDailyReset()
+{
+    MqlDateTime currentTime;
+    TimeToStruct(TimeCurrent(), currentTime);
+    
+    MqlDateTime lastTime;
+    TimeToStruct(lastResetDate, lastTime);
+    
+    // Check if it's a new day
+    if(currentTime.day != lastTime.day || currentTime.mon != lastTime.mon || currentTime.year != lastTime.year)
+    {
+        // Reset daily tracking
+        dailyStartEquity = accountInfo.Equity();
+        lastResetDate = TimeCurrent();
+        dailyTradeCount = 0;
+        dailyLossLimitHit = false;
+        
+        Print("========================================");
+        Print("NEW TRADING DAY - Daily limits reset");
+        Print("Starting Equity: $", DoubleToString(dailyStartEquity, 2));
+        Print("Trades available today: ", Max_Trades_Per_Day);
+        Print("========================================");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Get daily loss percentage (NEW - v1.03)                          |
+//+------------------------------------------------------------------+
+double GetDailyLossPercent()
+{
+    double currentEquity = accountInfo.Equity();
+    if(dailyStartEquity <= 0) return 0;
+    
+    double dailyPL = currentEquity - dailyStartEquity;
+    double dailyPercent = (dailyPL / dailyStartEquity) * 100.0;
+    
+    return -dailyPercent; // Return as positive if loss
+}
+
+//+------------------------------------------------------------------+
+//| Check daily loss limit (NEW - v1.03)                             |
+//+------------------------------------------------------------------+
+bool CheckDailyLossLimit()
+{
+    double dailyLoss = GetDailyLossPercent();
+    
+    if(dailyLoss >= Max_Daily_Loss_Percent)
+    {
+        return true; // Daily loss limit exceeded
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Check volatility filter - Avoid news spikes (NEW - v1.03)        |
+//+------------------------------------------------------------------+
+bool PassVolatilityFilter()
+{
+    double atr_current[];
+    double atr_longterm[];
+    
+    ArraySetAsSeries(atr_current, true);
+    ArraySetAsSeries(atr_longterm, true);
+    
+    if(CopyBuffer(h1_atr_handle, 0, 0, 2, atr_current) < 2)
+        return true; // Can't check, allow trade
+        
+    if(CopyBuffer(h1_atr_longterm_handle, 0, 0, 2, atr_longterm) < 2)
+        return true; // Can't check, allow trade
+    
+    // Compare current ATR to 20-period average
+    double atr_ratio = atr_current[0] / atr_longterm[0];
+    
+    if(atr_ratio > Max_ATR_Multiplier)
+    {
+        Print("[VOLATILITY FILTER] ATR spike detected: ", DoubleToString(atr_ratio, 2), "x normal");
+        Print("Current ATR: ", DoubleToString(atr_current[0], 2), " vs Average: ", DoubleToString(atr_longterm[0], 2));
+        Print("⚠️ Likely NEWS EVENT - Avoiding trade!");
+        return false; // Volatility too high, likely news
+    }
+    
+    return true; // Volatility normal
+}
+
+//+------------------------------------------------------------------+
+//| Check spread filter - Avoid wide spreads (NEW - v1.03)           |
+//+------------------------------------------------------------------+
+bool PassSpreadFilter()
+{
+    long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+    
+    if(spread > Max_Spread_Points)
+    {
+        Print("[SPREAD FILTER] Spread too wide: ", spread, " points (max: ", Max_Spread_Points, ")");
+        Print("⚠️ Wide spread detected - Avoiding trade!");
+        return false;
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Check news time filter - Avoid major news times (NEW - v1.03)    |
+//+------------------------------------------------------------------+
+bool PassNewsFilter()
+{
+    MqlDateTime currentTime;
+    TimeToStruct(TimeCurrent(), currentTime);
+    
+    int currentHour = currentTime.hour;
+    int currentDay = currentTime.day_of_week;
+    
+    // NFP: First Friday of month at 12:30 GMT (8:30 EST)
+    if(currentDay == 5 && currentDay <= 7) // Friday, first week
+    {
+        if(currentHour >= (12 - News_Avoid_Hours_Before) && 
+           currentHour <= (14 + News_Avoid_Hours_After))
+        {
+            Print("[NEWS FILTER] NFP Friday - Avoiding 12:30 GMT ±", News_Avoid_Hours_Before, "-", News_Avoid_Hours_After, "hrs");
+            return false;
+        }
+    }
+    
+    // US CPI: Usually 2nd Tuesday at 12:30 GMT
+    if(currentDay == 2 && currentTime.day >= 8 && currentTime.day <= 14)
+    {
+        if(currentHour >= (12 - News_Avoid_Hours_Before) && 
+           currentHour <= (14 + News_Avoid_Hours_After))
+        {
+            Print("[NEWS FILTER] Potential CPI release - Avoiding 12:30 GMT");
+            return false;
+        }
+    }
+    
+    // FOMC: Wednesday at 18:00 GMT (2:00 PM EST) - happens 8x per year
+    if(currentDay == 3) // Wednesday
+    {
+        if(currentHour >= (18 - News_Avoid_Hours_Before) && 
+           currentHour <= (20 + News_Avoid_Hours_After))
+        {
+            Print("[NEWS FILTER] Potential FOMC - Avoiding 18:00 GMT");
+            return false;
+        }
+    }
+    
+    // General high-impact news times (GMT)
+    // 8:30 GMT - European opens, UK news
+    if(currentHour >= (8 - News_Avoid_Hours_Before) && currentHour <= (9 + News_Avoid_Hours_After))
+    {
+        // Allow on weekends (no news)
+        if(currentDay >= 1 && currentDay <= 5)
+        {
+            if(Enable_Debug_Logging)
+                Print("[NEWS FILTER] European session start - high volatility time");
+            return false;
+        }
+    }
+    
+    // 12:30-14:30 GMT - Major US news releases
+    if(currentHour >= (12 - News_Avoid_Hours_Before) && currentHour <= (14 + News_Avoid_Hours_After))
+    {
+        if(currentDay >= 1 && currentDay <= 5)
+        {
+            if(Enable_Debug_Logging)
+                Print("[NEWS FILTER] US news window - avoiding 12:30-14:30 GMT");
+            return false;
+        }
+    }
+    
+    return true; // No major news expected
 }
 
 //+------------------------------------------------------------------+
@@ -737,6 +994,31 @@ double CalculatePositionSize()
     // Formula: Lot = Balance / 50000
     double lots = accountBalance / 50000.0;
     
+    // NEW v1.03: Reduce position size if experiencing drawdown (equity-based adjustment)
+    double currentEquity = accountInfo.Equity();
+    double equityDrawdownPercent = 0;
+    
+    if(peakEquity > 0)
+    {
+        equityDrawdownPercent = ((peakEquity - currentEquity) / peakEquity) * 100.0;
+    }
+    
+    // If in drawdown, reduce position size proportionally
+    if(equityDrawdownPercent > 0)
+    {
+        double reductionFactor = 1.0 - (equityDrawdownPercent / 100.0); // Linear reduction
+        if(reductionFactor < 0.5) reductionFactor = 0.5; // Never go below 50% of normal size
+        
+        lots = lots * reductionFactor;
+        
+        if(Enable_Debug_Logging)
+        {
+            Print("[POSITION SIZING] Drawdown detected: ", DoubleToString(equityDrawdownPercent, 2), "%");
+            Print("[POSITION SIZING] Reducing position size by ", DoubleToString((1.0 - reductionFactor) * 100, 1), "%");
+            Print("[POSITION SIZING] Adjusted lot: ", DoubleToString(lots, 2));
+        }
+    }
+    
     // Get broker constraints
     double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
@@ -819,6 +1101,8 @@ void AnalyzeAndTrade()
             if(trade.Buy(lotSize, _Symbol, ask, sl, tp, Trade_Comment))
             {
                 Print("BUY order executed successfully. Ticket: ", trade.ResultOrder());
+                dailyTradeCount++; // Increment daily trade counter (v1.03)
+                Print("Daily trades: ", dailyTradeCount, " / ", Max_Trades_Per_Day);
             }
             else
             {
@@ -862,6 +1146,8 @@ void AnalyzeAndTrade()
             if(trade.Sell(lotSize, _Symbol, bid, sl, tp, Trade_Comment))
             {
                 Print("SELL order executed successfully. Ticket: ", trade.ResultOrder());
+                dailyTradeCount++; // Increment daily trade counter (v1.03)
+                Print("Daily trades: ", dailyTradeCount, " / ", Max_Trades_Per_Day);
             }
             else
             {
