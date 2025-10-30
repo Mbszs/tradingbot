@@ -784,8 +784,34 @@ bool CheckM15BuyEntry()
             return false;
     }
     
+    // FINAL CONFIRMATION: Get MACD and RSI direction (ALWAYS - NEW v1.03)
+    double macdMain[], macdSignal[], rsi[];
+    ArraySetAsSeries(macdMain, true);
+    ArraySetAsSeries(macdSignal, true);
+    ArraySetAsSeries(rsi, true);
+    
+    if(CopyBuffer(m15_macd_handle, 0, 0, 3, macdMain) <= 0) return false;
+    if(CopyBuffer(m15_macd_handle, 1, 0, 3, macdSignal) <= 0) return false;
+    if(CopyBuffer(m15_rsi_handle, 0, 0, 3, rsi) <= 0) return false;
+    
+    double histogram0 = macdMain[0] - macdSignal[0];
+    double histogram1 = macdMain[1] - macdSignal[1];
+    
+    bool macd_heading_up = histogram0 > histogram1;
+    bool rsi_heading_up = rsi[0] > rsi[1];
+    
+    if(!macd_heading_up || !rsi_heading_up)
+    {
+        if(Enable_Debug_Logging)
+            Print("[MOMENTUM] Buy rejected - MACD up: ", macd_heading_up, " (", histogram0, " vs ", histogram1, ") | RSI up: ", rsi_heading_up, " (", rsi[0], " vs ", rsi[1], ")");
+        return false;
+    }
+    
     if(Enable_Debug_Logging)
+    {
+        Print("[MOMENTUM] ✓ MACD & RSI both heading UP - Trade confirmed!");
         Print("[DEBUG BUY] *** ALL CONDITIONS PASSED - BUY SIGNAL VALID ***");
+    }
     
     return true;
 }
@@ -889,8 +915,34 @@ bool CheckM15SellEntry()
             return false;
     }
     
+    // FINAL CONFIRMATION: Get MACD and RSI direction (ALWAYS - NEW v1.03)
+    double macdMain[], macdSignal[], rsi[];
+    ArraySetAsSeries(macdMain, true);
+    ArraySetAsSeries(macdSignal, true);
+    ArraySetAsSeries(rsi, true);
+    
+    if(CopyBuffer(m15_macd_handle, 0, 0, 3, macdMain) <= 0) return false;
+    if(CopyBuffer(m15_macd_handle, 1, 0, 3, macdSignal) <= 0) return false;
+    if(CopyBuffer(m15_rsi_handle, 0, 0, 3, rsi) <= 0) return false;
+    
+    double histogram0 = macdMain[0] - macdSignal[0];
+    double histogram1 = macdMain[1] - macdSignal[1];
+    
+    bool macd_heading_down = histogram0 < histogram1;
+    bool rsi_heading_down = rsi[0] < rsi[1];
+    
+    if(!macd_heading_down || !rsi_heading_down)
+    {
+        if(Enable_Debug_Logging)
+            Print("[MOMENTUM] Sell rejected - MACD down: ", macd_heading_down, " (", histogram0, " vs ", histogram1, ") | RSI down: ", rsi_heading_down, " (", rsi[0], " vs ", rsi[1], ")");
+        return false;
+    }
+    
     if(Enable_Debug_Logging)
+    {
+        Print("[MOMENTUM] ✓ MACD & RSI both heading DOWN - Trade confirmed!");
         Print("[DEBUG SELL] *** ALL CONDITIONS PASSED - SELL SIGNAL VALID ***");
+    }
     
     return true;
 }
