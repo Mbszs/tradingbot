@@ -357,20 +357,18 @@ void UpdateCircuitBreaker()
       circuitBreakerTriggered = true;
       Print(LogPrefix(), "Circuit breaker TRIGGERED: drawdown ", DoubleToString(ddPct, 2), "% >= ", DoubleToString(Max_Drawdown_Percent, 2), "%.");
 
-      // Close all existing positions
-      int i;
-      for(i = PositionsTotal() - 1; i >= 0; i--)
+      // Close this symbol's position managed by this EA
+      if(PositionSelect(_Symbol))
       {
-         if(!PositionSelectByIndex(i)) continue;
-         string sym = PositionGetString(POSITION_SYMBOL);
-         trade.PositionClose(sym);
+         trade.PositionClose(_Symbol);
       }
    }
 }
 
 bool HasAnyOpenPosition()
 {
-   return PositionsTotal() > 0;
+   // Only consider this symbol to avoid interfering with other EAs/symbols
+   return PositionSelect(_Symbol);
 }
 
 // ============================
