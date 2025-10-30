@@ -20,8 +20,8 @@
 sinput group "=== Position Pyramiding ==="
 input bool Enable_Pyramiding = true;        // Enable position stacking
 input int Max_Pyramid_Levels = 5;           // Maximum stacked positions
-input double Pyramid_Spacing_ATR = 0.5;     // ATR distance between entries
-input double Pyramid_Lot_Multiplier = 1.0;  // Lot multiplier per level (1.0 = same size)
+input double Pyramid_Spacing_ATR = 0.3;     // ATR distance between entries (AGGRESSIVE)
+input double Pyramid_Lot_Multiplier = 1.2;  // Lot multiplier per level (AGGRESSIVE)
 input bool Scale_In_On_Strength = true;     // Add positions on trend strength
 
 // === Reversal Detection ===
@@ -44,7 +44,7 @@ sinput group "=== Adaptive Learning (AI) ==="
 input bool Enable_Adaptive_Learning = true;     // Enable AI learning
 input int Learning_Period_Days = 30;            // Days to learn from
 input bool Auto_Adjust_Parameters = true;       // Auto-tune parameters
-input double Learning_Rate = 0.1;               // How fast to adapt (0.01-0.5)
+input double Learning_Rate = 0.3;               // AGGRESSIVE - Faster adaptation
 
 // === H1 Trend Setup ===
 sinput group "=== H1 Trend Setup ==="
@@ -56,18 +56,18 @@ input int MA_Period_4 = 55;
 // === M15 Entry Setup ===
 sinput group "=== M15 Entry Setup ==="
 input int M15_MA_Period = 21;
-input bool Use_MACD_Confirmation = true;
+input bool Use_MACD_Confirmation = false;  // DISABLED for more trades
 input int MACD_Fast = 12;
 input int MACD_Slow = 26;
 input int MACD_Signal = 9;
-input bool Use_RSI_Confirmation = true;
+input bool Use_RSI_Confirmation = false;   // DISABLED for more trades
 input int RSI_Period = 14;
 input double RSI_Level = 50.0;
 input bool Strict_RSI_Cross = false;
 
 // === Risk Management ===
 sinput group "=== Risk Management ==="
-input double Risk_Per_Trade = 0.5;
+input double Risk_Per_Trade = 1.5;          // AGGRESSIVE (1.5% per trade)
 input double Fixed_Lot_Size = 0.0;
 input bool Use_Stop_Loss = false;
 input int ATR_Period = 14;
@@ -75,7 +75,7 @@ input double ATR_Multiplier_ISL = 2.0;
 
 // === Trading Sessions ===
 sinput group "=== Trading Sessions ==="
-input bool Use_Session_Filter = true;
+input bool Use_Session_Filter = false;      // DISABLED - Trade 24/7
 input bool Trade_Asian_Session = false;
 input bool Trade_London_Session = true;
 input bool Trade_NewYork_Session = true;
