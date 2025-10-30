@@ -6,7 +6,6 @@
 #property copyright "TrendFollowing EA 2025"
 #property link      ""
 #property version   "1.02"
-#property strict
 #property description "No stop loss - Manual exit only"
 #property description "Session filters with strong trend override"
 #property description "No circuit breaker - Permanent trading mode"
