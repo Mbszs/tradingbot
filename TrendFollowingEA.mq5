@@ -66,10 +66,10 @@ input bool Trade_NewYork_Session = true;    // Trade New York session (13:00-22:
 input bool Override_On_Strong_Trend = true; // Trade anytime if strong trend detected
 input double Strong_Trend_ADX_Level = 25.0; // ADX level for strong trend
 
-// === Circuit Breaker (Optional) ===
-sinput group "=== Circuit Breaker (Disabled by Default) ==="
-input bool Enable_Circuit_Breaker = false;  // Enable Circuit Breaker
-input double Max_Drawdown_Percent = 20.0;   // Max Drawdown % before shutdown
+// === Circuit Breaker (Optional - NOT RECOMMENDED) ===
+sinput group "=== Circuit Breaker (Optional - NOT RECOMMENDED) ==="
+input bool Enable_Circuit_Breaker = false;  // Enable Circuit Breaker (KEEP OFF)
+input double Max_Drawdown_Percent = 100.0;  // Max Drawdown % (only if enabled)
 
 // === General Settings ===
 sinput group "=== General Settings ==="
@@ -150,7 +150,9 @@ int OnInit()
     Print("TrendFollowing EA v1.02 initialized successfully");
     Print("Mode: NO STOP LOSS - Manual exits only");
     Print("Session Filter: ", Use_Session_Filter ? "ENABLED" : "DISABLED");
-    Print("Circuit Breaker: ", Enable_Circuit_Breaker ? "ENABLED" : "DISABLED");
+    Print("Circuit Breaker: ", Enable_Circuit_Breaker ? "ENABLED" : "DISABLED - PERMANENT TRADING");
+    if(!Enable_Circuit_Breaker)
+        Print("WARNING: No drawdown protection - EA will trade indefinitely");
     if(Fixed_Lot_Size > 0)
         Print("Using fixed lot size: ", Fixed_Lot_Size);
     else
