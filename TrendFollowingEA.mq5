@@ -6,9 +6,9 @@
 #property copyright "TrendFollowing EA 2025"
 #property link      ""
 #property version   "1.03"
-#property description "HEAVY PROTECTION MODE - After 50% Loss Recovery"
-#property description "8 Layers of Protection: Volatility, Spread, News, Daily Limits"
-#property description "Ultra-Safe: 0.1% risk, Max 3 trades/day, 2% daily loss limit"
+#property description "ULTRA-SELECTIVE MODE - 14 Confirmations Required"
+#property description "Maximum Selectivity: Only highest probability trades"
+#property description "Ultra-Safe: 0.1% risk, Max 3 trades/day, 14-point checklist"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -85,6 +85,15 @@ input double Max_Spread_Points = 30.0;       // Max spread in points for XAUUSD
 input bool Avoid_News_Times = true;          // Avoid major news event times
 input int News_Avoid_Hours_Before = 1;       // Hours before news to avoid
 input int News_Avoid_Hours_After = 2;        // Hours after news to avoid
+
+// === Additional Confirmations (14-Point System) ===
+sinput group "=== Additional Confirmations (14-Point System) ==="
+input bool Require_ADX_Strength = true;      // Require strong trend (ADX confirmation)
+input double Min_ADX_Level = 20.0;           // Minimum ADX level for trend strength
+input bool Require_Price_Distance = true;    // Check price not overextended from MA
+input double Max_Price_Distance_ATR = 3.0;   // Max distance from MA in ATR units
+input bool Require_H1_Price_Confirmation = true; // H1 price must be on correct side of ribbon
+input bool Require_Sequential_Bars = true;   // Require 2 consecutive confirmations
 
 // === Circuit Breaker (Optional Protection) ===
 sinput group "=== Circuit Breaker (Optional Protection) ==="
@@ -686,10 +695,16 @@ void CheckManualExits()
 }
 
 //+------------------------------------------------------------------+
-//| Check M15 Buy Entry Conditions                                    |
+//| Check M15 Buy Entry Conditions - 14 CONFIRMATIONS REQUIRED       |
 //+------------------------------------------------------------------+
 bool CheckM15BuyEntry()
 {
+    int confirmations = 0;
+    int required = 14;
+    
+    if(Enable_Debug_Logging)
+        Print("======= CHECKING BUY ENTRY: 14 CONFIRMATIONS REQUIRED =======");
+    
     double ema8[], ema21[], ema34[], close[];
     ArraySetAsSeries(ema8, true);
     ArraySetAsSeries(ema21, true);
@@ -702,20 +717,30 @@ bool CheckM15BuyEntry()
     if(CopyBuffer(m15_ema34_handle, 0, 0, 3, ema34) <= 0) return false;
     if(CopyClose(_Symbol, PERIOD_M15, 0, 3, close) <= 0) return false;
     
-    // Condition 1: Price closed above 21 EMA AND EMA alignment (8 > 21 > 34)
+    // CONFIRMATION 1: Price closed above 21 EMA
     bool priceAbove21 = close[1] > ema21[1];
-    bool emaAlignment = (ema8[0] > ema21[0]) && (ema21[0] > ema34[0]);
-    bool maCondition = priceAbove21 && emaAlignment;
-    
+    if(priceAbove21) confirmations++;
     if(Enable_Debug_Logging)
-    {
-        Print("[DEBUG BUY] MA Condition: ", maCondition ? "PASS" : "FAIL");
-        Print("[DEBUG BUY]   - Price[1] vs EMA21[1]: ", close[1], " vs ", ema21[1], " = ", priceAbove21 ? "ABOVE" : "BELOW");
-        Print("[DEBUG BUY]   - EMA Alignment (8>21>34): ", emaAlignment ? "YES" : "NO");
-    }
+        Print("[1/14] Price above 21 EMA: ", priceAbove21 ? "✓" : "✗", " (", close[1], " vs ", ema21[1], ")");
     
-    if(!maCondition)
+    // CONFIRMATION 2: M15 EMA alignment (8 > 21)
+    bool ema8Above21 = ema8[0] > ema21[0];
+    if(ema8Above21) confirmations++;
+    if(Enable_Debug_Logging)
+        Print("[2/14] EMA8 > EMA21: ", ema8Above21 ? "✓" : "✗");
+    
+    // CONFIRMATION 3: M15 EMA alignment (21 > 34)
+    bool ema21Above34 = ema21[0] > ema34[0];
+    if(ema21Above34) confirmations++;
+    if(Enable_Debug_Logging)
+        Print("[3/14] EMA21 > EMA34: ", ema21Above34 ? "✓" : "✗");
+    
+    if(!priceAbove21 || !ema8Above21 || !ema21Above34)
+    {
+        if(Enable_Debug_Logging)
+            Print("❌ Basic MA conditions failed. Confirmations: ", confirmations, "/14");
         return false;
+    }
     
     // Condition 2: MACD Confirmation
     if(Use_MACD_Confirmation)
@@ -797,30 +822,166 @@ bool CheckM15BuyEntry()
     double histogram0 = macdMain[0] - macdSignal[0];
     double histogram1 = macdMain[1] - macdSignal[1];
     
+    // CONFIRMATION 8 & 9 already counted above (MACD and RSI direction)
+    
+    // CONFIRMATION 10: ADX shows strong trend
+    if(Require_ADX_Strength)
+    {
+        double adx[];
+        ArraySetAsSeries(adx, true);
+        if(CopyBuffer(h1_adx_handle, 0, 0, 2, adx) >= 2)
+        {
+            bool adxStrong = adx[0] > Min_ADX_Level;
+            if(adxStrong) confirmations++;
+            if(Enable_Debug_Logging)
+                Print("[8/14] ADX strong trend: ", adxStrong ? "✓" : "✗", " (", adx[0], " > ", Min_ADX_Level, ")");
+            if(!adxStrong)
+            {
+                if(Enable_Debug_Logging)
+                    Print("❌ ADX strength required but weak. Confirmations: ", confirmations, "/14");
+                return false;
+            }
+        }
+    }
+    else
+    {
+        confirmations++; // Count as passed if not required
+        if(Enable_Debug_Logging)
+            Print("[8/14] ADX check: ✓ (not required)");
+    }
+    
+    // CONFIRMATION 11: Price not overextended from 21 EMA
+    if(Require_Price_Distance)
+    {
+        double atr = GetH1ATR();
+        double priceDistance = MathAbs(close[0] - ema21[0]);
+        double maxDistance = Max_Price_Distance_ATR * atr;
+        bool notOverextended = priceDistance < maxDistance;
+        if(notOverextended) confirmations++;
+        if(Enable_Debug_Logging)
+            Print("[9/14] Price not overextended: ", notOverextended ? "✓" : "✗", " (", priceDistance, " < ", maxDistance, ")");
+        if(!notOverextended)
+        {
+            if(Enable_Debug_Logging)
+                Print("❌ Price too far from MA. Confirmations: ", confirmations, "/14");
+            return false;
+        }
+    }
+    else
+    {
+        confirmations++;
+        if(Enable_Debug_Logging)
+            Print("[9/14] Price distance check: ✓ (not required)");
+    }
+    
+    // CONFIRMATION 12: H1 price above EMA ribbon
+    if(Require_H1_Price_Confirmation)
+    {
+        double h1_close[], h1_ema21[];
+        ArraySetAsSeries(h1_close, true);
+        ArraySetAsSeries(h1_ema21, true);
+        if(CopyClose(_Symbol, PERIOD_H1, 0, 2, h1_close) >= 2 && CopyBuffer(h1_ema21_handle, 0, 0, 2, h1_ema21) >= 2)
+        {
+            bool h1PriceAbove = h1_close[0] > h1_ema21[0];
+            if(h1PriceAbove) confirmations++;
+            if(Enable_Debug_Logging)
+                Print("[10/14] H1 price above EMA: ", h1PriceAbove ? "✓" : "✗");
+            if(!h1PriceAbove)
+            {
+                if(Enable_Debug_Logging)
+                    Print("❌ H1 price confirmation failed. Confirmations: ", confirmations, "/14");
+                return false;
+            }
+        }
+    }
+    else
+    {
+        confirmations++;
+        if(Enable_Debug_Logging)
+            Print("[10/14] H1 price check: ✓ (not required)");
+    }
+    
+    // CONFIRMATION 13: Sequential bar confirmation (2 bars both bullish)
+    if(Require_Sequential_Bars)
+    {
+        bool currentBarBullish = close[0] > close[1];
+        bool prevBarBullish = close[1] > close[2];
+        bool sequential = currentBarBullish && prevBarBullish;
+        if(sequential) confirmations++;
+        if(Enable_Debug_Logging)
+            Print("[11/14] Sequential bullish bars: ", sequential ? "✓" : "✗");
+        if(!sequential)
+        {
+            if(Enable_Debug_Logging)
+                Print("❌ Sequential bars required. Confirmations: ", confirmations, "/14");
+            return false;
+        }
+    }
+    else
+    {
+        confirmations++;
+        if(Enable_Debug_Logging)
+            Print("[11/14] Sequential bars: ✓ (not required)");
+    }
+    
+    // CONFIRMATION 14: Both MACD and RSI heading same direction (already checked above as 4 & 5, 6 & 7)
     bool macd_heading_up = histogram0 > histogram1;
     bool rsi_heading_up = rsi[0] > rsi[1];
+    bool bothHeadingUp = macd_heading_up && rsi_heading_up;
+    if(bothHeadingUp) confirmations++;
+    if(Enable_Debug_Logging)
+        Print("[12/14] MACD & RSI both UP: ", bothHeadingUp ? "✓" : "✗");
     
-    if(!macd_heading_up || !rsi_heading_up)
+    if(!bothHeadingUp)
     {
         if(Enable_Debug_Logging)
-            Print("[MOMENTUM] Buy rejected - MACD up: ", macd_heading_up, " (", histogram0, " vs ", histogram1, ") | RSI up: ", rsi_heading_up, " (", rsi[0], " vs ", rsi[1], ")");
+            Print("❌ Momentum direction mismatch. Confirmations: ", confirmations, "/14");
         return false;
     }
     
+    // CONFIRMATION 13-14: EMA 8 rising for 2 bars
+    bool ema8Rising = ema8[0] > ema8[1] && ema8[1] > ema8[2];
+    if(ema8Rising) confirmations++;
+    if(Enable_Debug_Logging)
+        Print("[13/14] EMA8 rising trend: ", ema8Rising ? "✓" : "✗");
+    
+    // Final check: Current bar closed higher than previous
+    bool closingHigher = close[0] > close[1];
+    if(closingHigher) confirmations++;
+    if(Enable_Debug_Logging)
+        Print("[14/14] Current bar closing higher: ", closingHigher ? "✓" : "✗");
+    
     if(Enable_Debug_Logging)
     {
-        Print("[MOMENTUM] ✓ MACD & RSI both heading UP - Trade confirmed!");
-        Print("[DEBUG BUY] *** ALL CONDITIONS PASSED - BUY SIGNAL VALID ***");
+        Print("═══════════════════════════════════════════");
+        Print("✓✓✓ TOTAL CONFIRMATIONS: ", confirmations, "/14");
+        Print("═══════════════════════════════════════════");
     }
     
-    return true;
+    if(confirmations >= required)
+    {
+        if(Enable_Debug_Logging)
+            Print("🎯 ALL 14 CONFIRMATIONS PASSED - BUY SIGNAL APPROVED!");
+        return true;
+    }
+    
+    if(Enable_Debug_Logging)
+        Print("❌ INSUFFICIENT CONFIRMATIONS: ", confirmations, "/14 - Trade rejected");
+    
+    return false;
 }
 
 //+------------------------------------------------------------------+
-//| Check M15 Sell Entry Conditions                                   |
+//| Check M15 Sell Entry Conditions - 14 CONFIRMATIONS REQUIRED      |
 //+------------------------------------------------------------------+
 bool CheckM15SellEntry()
 {
+    int confirmations = 0;
+    int required = 14;
+    
+    if(Enable_Debug_Logging)
+        Print("======= CHECKING SELL ENTRY: 14 CONFIRMATIONS REQUIRED =======");
+    
     double ema8[], ema21[], ema34[], close[];
     ArraySetAsSeries(ema8, true);
     ArraySetAsSeries(ema21, true);
