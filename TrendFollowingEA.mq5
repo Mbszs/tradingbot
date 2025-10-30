@@ -154,8 +154,8 @@ int OnInit()
     Print("TrendFollowing EA v1.02 initialized successfully");
     Print("Mode: NO STOP LOSS - Manual exits only");
     Print("Session Filter: ", Use_Session_Filter ? "ENABLED" : "DISABLED");
-    Print("Circuit Breaker: REMOVED - Permanent trading mode");
-    Print("WARNING: No drawdown protection - EA will trade indefinitely");
+    Print("Circuit Breaker: ENABLED at ", Max_Drawdown_Percent, "% for smooth equity");
+    Print("Mode: CONSERVATIVE - Smooth linear profits, tight protection");
     if(Fixed_Lot_Size > 0)
         Print("Using fixed lot size: ", Fixed_Lot_Size);
     else
@@ -194,7 +194,16 @@ void OnTick()
     if(!IsNewBar())
         return;
     
-    // Circuit breaker removed - trades permanently
+    // Check circuit breaker
+    if(Enable_Circuit_Breaker)
+    {
+        CheckCircuitBreaker();
+        if(circuitBreakerTriggered)
+        {
+            Print("CIRCUIT BREAKER ACTIVE - Protecting capital");
+            return;
+        }
+    }
     
     // Check for manual exit conditions on existing positions
     CheckManualExits();
@@ -233,7 +242,34 @@ bool IsNewBar()
     return false;
 }
 
-// Circuit breaker function removed - EA trades permanently with no limits
+//+------------------------------------------------------------------+
+//| Check Circuit Breaker (Max Drawdown)                             |
+//+------------------------------------------------------------------+
+void CheckCircuitBreaker()
+{
+    double currentEquity = accountInfo.Equity();
+    
+    // Update peak equity
+    if(currentEquity > peakEquity)
+        peakEquity = currentEquity;
+    
+    // Calculate drawdown from peak
+    double drawdownPercent = ((peakEquity - currentEquity) / peakEquity) * 100.0;
+    
+    if(drawdownPercent >= Max_Drawdown_Percent)
+    {
+        if(!circuitBreakerTriggered)
+        {
+            Print("!!! CIRCUIT BREAKER TRIGGERED - SMOOTH EQUITY PROTECTION !!!");
+            Print("Drawdown: ", DoubleToString(drawdownPercent, 2), "%");
+            Print("Peak Equity: ", peakEquity, " Current Equity: ", currentEquity);
+            
+            // Close all positions
+            CloseAllPositions();
+            circuitBreakerTriggered = true;
+        }
+    }
+}
 
 //+------------------------------------------------------------------+
 //| Check if we have an open position                                |
@@ -251,7 +287,23 @@ bool HasOpenPosition()
     return false;
 }
 
-// CloseAllPositions function removed - only manual exits used
+//+------------------------------------------------------------------+
+//| Close all positions (for circuit breaker)                        |
+//+------------------------------------------------------------------+
+void CloseAllPositions()
+{
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        if(positionInfo.SelectByIndex(i))
+        {
+            if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == Magic_Number)
+            {
+                trade.PositionClose(positionInfo.Ticket());
+                Print("Position closed for protection: ", positionInfo.Ticket());
+            }
+        }
+    }
+}
 
 //+------------------------------------------------------------------+
 //| Get H1 Trend Bias                                                 |
@@ -745,20 +797,21 @@ void AnalyzeAndTrade()
             double sl = 0;
             double tp = 0;
             
-            // Set stop loss only if enabled
+            // Set stop loss (ENABLED for smooth profits)
             if(Use_Stop_Loss)
             {
                 sl = bid - (ATR_Multiplier_ISL * atr);
-                Print("=== BUY SIGNAL (WITH SL) ===");
-                Print("Entry: ", ask, " | SL: ", sl, " | Lot: ", lotSize);
-            }
-            else
-            {
-                Print("=== BUY SIGNAL (NO SL - MANUAL EXIT) ===");
-                Print("Entry: ", ask, " | Lot: ", lotSize, " | Manual exit enabled");
             }
             
-            Print("ATR: ", atr);
+            // Set take profit (locks in gains)
+            if(Use_Take_Profit)
+            {
+                tp = ask + (ATR_Multiplier_TP * atr);
+            }
+            
+            Print("=== BUY SIGNAL (SMOOTH PROFIT MODE) ===");
+            Print("Entry: ", ask, " | SL: ", sl, " | TP: ", tp, " | Lot: ", lotSize);
+            Print("ATR: ", atr, " | Protection: ENABLED");
             
             if(trade.Buy(lotSize, _Symbol, ask, sl, tp, Trade_Comment))
             {
@@ -787,20 +840,21 @@ void AnalyzeAndTrade()
             double sl = 0;
             double tp = 0;
             
-            // Set stop loss only if enabled
+            // Set stop loss (ENABLED for smooth profits)
             if(Use_Stop_Loss)
             {
                 sl = ask + (ATR_Multiplier_ISL * atr);
-                Print("=== SELL SIGNAL (WITH SL) ===");
-                Print("Entry: ", bid, " | SL: ", sl, " | Lot: ", lotSize);
-            }
-            else
-            {
-                Print("=== SELL SIGNAL (NO SL - MANUAL EXIT) ===");
-                Print("Entry: ", bid, " | Lot: ", lotSize, " | Manual exit enabled");
             }
             
-            Print("ATR: ", atr);
+            // Set take profit (locks in gains)
+            if(Use_Take_Profit)
+            {
+                tp = bid - (ATR_Multiplier_TP * atr);
+            }
+            
+            Print("=== SELL SIGNAL (SMOOTH PROFIT MODE) ===");
+            Print("Entry: ", bid, " | SL: ", sl, " | TP: ", tp, " | Lot: ", lotSize);
+            Print("ATR: ", atr, " | Protection: ENABLED");
             
             if(trade.Sell(lotSize, _Symbol, bid, sl, tp, Trade_Comment))
             {
@@ -847,6 +901,43 @@ void ManageOpenPositions()
             profitDistance = positionOpenPrice - currentPrice;
         
         double profitInATR = profitDistance / atr;
+        
+        // Move stop loss to break-even first (SMOOTH PROFIT PROTECTION)
+        if(Move_SL_To_Breakeven && profitInATR >= Breakeven_Trigger_ATR)
+        {
+            double breakEvenSL = 0;
+            
+            if(positionInfo.Type() == POSITION_TYPE_BUY)
+            {
+                breakEvenSL = positionOpenPrice + (SymbolInfoDouble(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+                
+                // Only move to BE if current SL is below open price
+                if(positionCurrentSL < positionOpenPrice && breakEvenSL > positionCurrentSL)
+                {
+                    if(trade.PositionModify(positionInfo.Ticket(), breakEvenSL, positionInfo.TakeProfit()))
+                    {
+                        Print("[BREAK-EVEN] SL moved to break-even for ticket: ", positionInfo.Ticket());
+                        Print("Now risk-free trade!");
+                    }
+                    continue; // Don't apply trailing stop yet
+                }
+            }
+            else // SELL
+            {
+                breakEvenSL = positionOpenPrice - (SymbolInfoDouble(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+                
+                // Only move to BE if current SL is above open price
+                if(positionCurrentSL == 0 || positionCurrentSL > positionOpenPrice)
+                {
+                    if(trade.PositionModify(positionInfo.Ticket(), breakEvenSL, positionInfo.TakeProfit()))
+                    {
+                        Print("[BREAK-EVEN] SL moved to break-even for ticket: ", positionInfo.Ticket());
+                        Print("Now risk-free trade!");
+                    }
+                    continue; // Don't apply trailing stop yet
+                }
+            }
+        }
         
         // Check if profit is enough to activate trailing stop
         if(profitInATR < ATR_Profit_Activation)
