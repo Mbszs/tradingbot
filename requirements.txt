@@ -12,8 +12,10 @@ seaborn>=0.12.0
 # Technical analysis (optional, we implement our own but this is useful)
 ta>=0.11.0
 
-# Data providers (uncomment based on your broker/exchange)
-# MetaTrader5>=5.0.45           # For MT5 broker
+# MetaTrader 5 - REQUIRED for MT5 integration
+MetaTrader5>=5.0.45
+
+# Data providers (optional alternatives)
 # ccxt>=4.0.0                    # For cryptocurrency exchanges
 # yfinance>=0.2.28               # For free stock/forex data
 

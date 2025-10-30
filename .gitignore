@@ -52,9 +52,16 @@ Thumbs.db
 *.log
 backtest_*.png
 backtest_*.json
+mt5_*.json
 
-# Sensitive
+# Sensitive - IMPORTANT!
 config_local.py
 .env
 credentials.json
 api_keys.txt
+mt5_credentials.py
+broker_credentials.txt
+
+# MT5
+*.ex5
+*.mq5
