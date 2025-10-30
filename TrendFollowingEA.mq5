@@ -70,10 +70,10 @@ input bool Trade_NewYork_Session = true;    // Trade New York session (13:00-22:
 input bool Override_On_Strong_Trend = true; // Trade anytime if strong trend detected
 input double Strong_Trend_ADX_Level = 25.0; // ADX level for strong trend
 
-// === Circuit Breaker (ENABLED for Smooth Profits) ===
-sinput group "=== Circuit Breaker (ENABLED for Smooth Profits) ==="
-input bool Enable_Circuit_Breaker = true;   // Enable Circuit Breaker
-input double Max_Drawdown_Percent = 8.0;    // Max Drawdown % (TIGHT for smooth equity)
+// === Circuit Breaker (Optional Protection) ===
+sinput group "=== Circuit Breaker (Optional Protection) ==="
+input bool Enable_Circuit_Breaker = false;  // Enable Circuit Breaker (DISABLED by user)
+input double Max_Drawdown_Percent = 8.0;    // Max Drawdown % (if enabled)
 
 // === General Settings ===
 sinput group "=== General Settings ==="
@@ -154,8 +154,11 @@ int OnInit()
     Print("TrendFollowing EA v1.02 initialized successfully");
     Print("Mode: NO STOP LOSS - Manual exits only");
     Print("Session Filter: ", Use_Session_Filter ? "ENABLED" : "DISABLED");
-    Print("Circuit Breaker: ENABLED at ", Max_Drawdown_Percent, "% for smooth equity");
-    Print("Mode: CONSERVATIVE - Smooth linear profits, tight protection");
+    if(Enable_Circuit_Breaker)
+        Print("Circuit Breaker: ENABLED at ", Max_Drawdown_Percent, "%");
+    else
+        Print("Circuit Breaker: DISABLED - No drawdown limit");
+    Print("Mode: CONSERVATIVE - Stop Loss, Take Profit, Break-Even protection enabled");
     if(Fixed_Lot_Size > 0)
         Print("Using fixed lot size: ", Fixed_Lot_Size);
     else
