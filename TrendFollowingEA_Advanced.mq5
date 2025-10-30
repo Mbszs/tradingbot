@@ -762,29 +762,29 @@ double GetH1ATR()
 
 //+------------------------------------------------------------------+
 //| Calculate position size                                           |
+//| Simple formula: $500 = 0.01 lot, $10,000 = 0.2 lot             |
 //+------------------------------------------------------------------+
 double CalculatePositionSize()
 {
+    // Use fixed lot size if specified
     if(Fixed_Lot_Size > 0)
         return Fixed_Lot_Size;
     
     double accountBalance = accountInfo.Balance();
-    double riskAmount = accountBalance * (Risk_Per_Trade / 100.0);
     
-    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+    // Simple linear scaling: $500 = 0.01 lot
+    // Formula: Lot = Balance / 50000
+    double lots = accountBalance / 50000.0;
+    
+    // Get broker constraints
     double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
     double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
     
-    double atr = GetH1ATR();
-    if(atr <= 0) atr = 10.0;
-    
-    double referenceDistance = atr * 2.0;
-    double lots = (riskAmount / (referenceDistance / tickSize * tickValue));
-    
+    // Normalize to lot step
     lots = MathFloor(lots / lotStep) * lotStep;
     
+    // Ensure within min/max bounds
     if(lots < minLot) lots = minLot;
     if(lots > maxLot) lots = maxLot;
     
