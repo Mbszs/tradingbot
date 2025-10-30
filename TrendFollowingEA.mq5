@@ -66,10 +66,7 @@ input bool Trade_NewYork_Session = true;    // Trade New York session (13:00-22:
 input bool Override_On_Strong_Trend = true; // Trade anytime if strong trend detected
 input double Strong_Trend_ADX_Level = 25.0; // ADX level for strong trend
 
-// === Circuit Breaker (Optional - NOT RECOMMENDED) ===
-sinput group "=== Circuit Breaker (Optional - NOT RECOMMENDED) ==="
-input bool Enable_Circuit_Breaker = false;  // Enable Circuit Breaker (KEEP OFF)
-input double Max_Drawdown_Percent = 100.0;  // Max Drawdown % (only if enabled)
+// Circuit Breaker REMOVED - Trades permanently with no limits
 
 // === General Settings ===
 sinput group "=== General Settings ==="
@@ -85,8 +82,6 @@ CTrade trade;
 CPositionInfo positionInfo;
 CAccountInfo accountInfo;
 
-double peakEquity = 0.0;            // Track peak equity for drawdown
-bool circuitBreakerTriggered = false; // Circuit breaker status
 datetime lastBarTime = 0;           // For new bar detection
 
 // Indicator handles (H1)
@@ -117,8 +112,7 @@ int OnInit()
     trade.SetTypeFilling(ORDER_FILLING_FOK);
     trade.SetAsyncMode(false);
     
-    // Initialize peak equity
-    peakEquity = accountInfo.Equity();
+    // No circuit breaker - permanent trading mode
     
     // Create H1 indicator handles
     h1_ema8_handle = iMA(_Symbol, PERIOD_H1, MA_Period_1, 0, MODE_EMA, PRICE_CLOSE);
@@ -150,9 +144,8 @@ int OnInit()
     Print("TrendFollowing EA v1.02 initialized successfully");
     Print("Mode: NO STOP LOSS - Manual exits only");
     Print("Session Filter: ", Use_Session_Filter ? "ENABLED" : "DISABLED");
-    Print("Circuit Breaker: ", Enable_Circuit_Breaker ? "ENABLED" : "DISABLED - PERMANENT TRADING");
-    if(!Enable_Circuit_Breaker)
-        Print("WARNING: No drawdown protection - EA will trade indefinitely");
+    Print("Circuit Breaker: REMOVED - Permanent trading mode");
+    Print("WARNING: No drawdown protection - EA will trade indefinitely");
     if(Fixed_Lot_Size > 0)
         Print("Using fixed lot size: ", Fixed_Lot_Size);
     else
@@ -191,16 +184,7 @@ void OnTick()
     if(!IsNewBar())
         return;
     
-    // Check circuit breaker
-    if(Enable_Circuit_Breaker)
-    {
-        CheckCircuitBreaker();
-        if(circuitBreakerTriggered)
-        {
-            Print("CIRCUIT BREAKER ACTIVE - No new trades allowed");
-            return;
-        }
-    }
+    // Circuit breaker removed - trades permanently
     
     // Check for manual exit conditions on existing positions
     CheckManualExits();
@@ -239,34 +223,7 @@ bool IsNewBar()
     return false;
 }
 
-//+------------------------------------------------------------------+
-//| Check Circuit Breaker (Max Drawdown)                             |
-//+------------------------------------------------------------------+
-void CheckCircuitBreaker()
-{
-    double currentEquity = accountInfo.Equity();
-    
-    // Update peak equity
-    if(currentEquity > peakEquity)
-        peakEquity = currentEquity;
-    
-    // Calculate drawdown from peak
-    double drawdownPercent = ((peakEquity - currentEquity) / peakEquity) * 100.0;
-    
-    if(drawdownPercent >= Max_Drawdown_Percent)
-    {
-        if(!circuitBreakerTriggered)
-        {
-            Print("!!! CIRCUIT BREAKER TRIGGERED !!!");
-            Print("Drawdown: ", DoubleToString(drawdownPercent, 2), "%");
-            Print("Peak Equity: ", peakEquity, " Current Equity: ", currentEquity);
-            
-            // Close all positions
-            CloseAllPositions();
-            circuitBreakerTriggered = true;
-        }
-    }
-}
+// Circuit breaker function removed - EA trades permanently with no limits
 
 //+------------------------------------------------------------------+
 //| Check if we have an open position                                |
@@ -284,23 +241,7 @@ bool HasOpenPosition()
     return false;
 }
 
-//+------------------------------------------------------------------+
-//| Close all positions (for circuit breaker)                        |
-//+------------------------------------------------------------------+
-void CloseAllPositions()
-{
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
-    {
-        if(positionInfo.SelectByIndex(i))
-        {
-            if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == Magic_Number)
-            {
-                trade.PositionClose(positionInfo.Ticket());
-                Print("Position closed by circuit breaker: ", positionInfo.Ticket());
-            }
-        }
-    }
-}
+// CloseAllPositions function removed - only manual exits used
 
 //+------------------------------------------------------------------+
 //| Get H1 Trend Bias                                                 |
