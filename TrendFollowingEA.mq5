@@ -39,13 +39,17 @@ input bool Strict_RSI_Cross = false; // Require exact RSI crossover (strict)
 
 // === Risk Management ===
 sinput group "=== Risk Management ==="
-input double Risk_Per_Trade = 0.5;  // Risk % per trade (0.5 = 0.5%)
+input double Risk_Per_Trade = 0.3;  // Risk % per trade (CONSERVATIVE for smooth equity)
 input double Fixed_Lot_Size = 0.0;  // Fixed lot size (0 = auto calculate)
-input bool Use_Stop_Loss = false;   // Use stop loss (NOT RECOMMENDED)
+input bool Use_Stop_Loss = true;    // Use stop loss (ENABLED for protection)
 input int ATR_Period = 14;          // ATR Period
-input double ATR_Multiplier_ISL = 2.0;  // ATR Multiplier for Initial Stop Loss (if enabled)
-input bool Use_Trailing_Stop = false; // Use trailing stop
-input double ATR_Multiplier_Trail = 1.0; // ATR Multiplier for Trailing Stop
+input double ATR_Multiplier_ISL = 1.5;  // ATR Multiplier for Initial Stop Loss (tight)
+input bool Use_Trailing_Stop = true;  // Use trailing stop (ENABLED)
+input double ATR_Multiplier_Trail = 0.8; // ATR Multiplier for Trailing Stop (tight)
+input bool Use_Take_Profit = true;   // Use take profit levels
+input double ATR_Multiplier_TP = 3.0; // ATR Multiplier for Take Profit
+input bool Move_SL_To_Breakeven = true; // Move SL to break-even at profit
+input double Breakeven_Trigger_ATR = 1.0; // ATR profit to trigger break-even
 input double ATR_Profit_Activation = 1.0; // ATR profit to activate trailing stop
 input bool Use_Aggressive_Trail = false; // Tighten trail on big profits
 input double ATR_Aggressive_Threshold = 3.0; // ATR profit for aggressive trail
@@ -66,7 +70,10 @@ input bool Trade_NewYork_Session = true;    // Trade New York session (13:00-22:
 input bool Override_On_Strong_Trend = true; // Trade anytime if strong trend detected
 input double Strong_Trend_ADX_Level = 25.0; // ADX level for strong trend
 
-// Circuit Breaker REMOVED - Trades permanently with no limits
+// === Circuit Breaker (ENABLED for Smooth Profits) ===
+sinput group "=== Circuit Breaker (ENABLED for Smooth Profits) ==="
+input bool Enable_Circuit_Breaker = true;   // Enable Circuit Breaker
+input double Max_Drawdown_Percent = 8.0;    // Max Drawdown % (TIGHT for smooth equity)
 
 // === General Settings ===
 sinput group "=== General Settings ==="
@@ -83,6 +90,8 @@ CPositionInfo positionInfo;
 CAccountInfo accountInfo;
 
 datetime lastBarTime = 0;           // For new bar detection
+double peakEquity = 0.0;            // Track peak equity for drawdown
+bool circuitBreakerTriggered = false; // Circuit breaker status
 
 // Indicator handles (H1)
 int h1_ema8_handle;
@@ -112,7 +121,8 @@ int OnInit()
     trade.SetTypeFilling(ORDER_FILLING_FOK);
     trade.SetAsyncMode(false);
     
-    // No circuit breaker - permanent trading mode
+    // Initialize circuit breaker for smooth equity
+    peakEquity = accountInfo.Equity();
     
     // Create H1 indicator handles
     h1_ema8_handle = iMA(_Symbol, PERIOD_H1, MA_Period_1, 0, MODE_EMA, PRICE_CLOSE);
