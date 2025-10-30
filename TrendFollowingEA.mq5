@@ -88,8 +88,8 @@ input int News_Avoid_Hours_After = 2;        // Hours after news to avoid
 
 // === Circuit Breaker (Optional Protection) ===
 sinput group "=== Circuit Breaker (Optional Protection) ==="
-input bool Enable_Circuit_Breaker = true;    // Enable Circuit Breaker (RE-ENABLED)
-input double Max_Drawdown_Percent = 5.0;     // Max Drawdown % (TIGHTER - was 8%)
+input bool Enable_Circuit_Breaker = false;   // Enable Circuit Breaker (DISABLED)
+input double Max_Drawdown_Percent = 5.0;     // Max Drawdown % (if enabled)
 
 // === General Settings ===
 sinput group "=== General Settings ==="
@@ -181,21 +181,12 @@ int OnInit()
     dailyTradeCount = 0;
     dailyLossLimitHit = false;
     
-    Print("========================================");
-    Print("TrendFollowing EA v1.03 - HEAVY PROTECTION MODE");
-    Print("========================================");
-    Print("⚠️ ULTRA-SAFE Settings Applied After 50% Loss:");
-    Print("- Risk per trade: ", Risk_Per_Trade, "% (ULTRA LOW)");
-    Print("- Stop Loss: ", ATR_Multiplier_ISL, " ATR (WIDER for breathing room)");
-    Print("- Take Profit: ", ATR_Multiplier_TP, " ATR (WIDER targets)");
-    Print("- Daily Loss Limit: ", Max_Daily_Loss_Percent, "% (NEW - stops daily trading)");
-    Print("- Max Trades/Day: ", Max_Trades_Per_Day, " (NEW - prevents overtrading)");
-    Print("- Volatility Filter: ", Enable_Volatility_Filter ? "ON" : "OFF", " (NEW - avoids news spikes)");
-    Print("- Spread Filter: ", Enable_Spread_Filter ? "ON" : "OFF", " (max ", Max_Spread_Points, " pts)");
-    Print("- News Avoidance: ", Avoid_News_Times ? "ON" : "OFF", " (±", News_Avoid_Hours_Before, "-", News_Avoid_Hours_After, "hrs)");
-    Print("- Circuit Breaker: ", Enable_Circuit_Breaker ? "ON" : "OFF", " at ", Max_Drawdown_Percent, "%");
-    Print("- Position Sizing: $500 = 0.01 lot");
-    Print("========================================");
+    Print("=== TrendFollowing EA v1.03 - HEAVY PROTECTION ===");
+    Print("Risk: ", Risk_Per_Trade, "% | SL: ", ATR_Multiplier_ISL, " ATR | TP: ", ATR_Multiplier_TP, " ATR");
+    Print("Daily Limit: ", Max_Daily_Loss_Percent, "% | Max Trades: ", Max_Trades_Per_Day, "/day");
+    Print("Filters: Vol=", Enable_Volatility_Filter ? "ON" : "OFF", " Spread=", Enable_Spread_Filter ? "ON" : "OFF", " News=", Avoid_News_Times ? "ON" : "OFF");
+    Print("Circuit Breaker: ", Enable_Circuit_Breaker ? "ON" : "OFF", " | Lot: $500=0.01");
+    Print("==================================================");
     
     return(INIT_SUCCEEDED);
 }
@@ -230,23 +221,21 @@ void OnTick()
     // Reset daily tracking at start of new day (NEW - v1.03)
     CheckDailyReset();
     
-    // Check daily loss limit (NEW - v1.03)
+    // Check daily loss limit
     if(Enable_Daily_Loss_Limit && CheckDailyLossLimit())
     {
         if(!dailyLossLimitHit)
         {
-            Print("⚠️ DAILY LOSS LIMIT HIT - No more trading today!");
-            Print("Daily loss: ", DoubleToString(GetDailyLossPercent(), 2), "%");
+            Print("⚠️ DAILY LIMIT: ", DoubleToString(GetDailyLossPercent(), 2), "% loss - Stopped!");
             dailyLossLimitHit = true;
         }
-        return; // Stop trading for today
+        return;
     }
     
-    // Check max trades per day (NEW - v1.03)
+    // Check max trades per day
     if(dailyTradeCount >= Max_Trades_Per_Day)
     {
-        if(Enable_Debug_Logging)
-            Print("[PROTECTION] Max trades per day reached: ", dailyTradeCount);
+        if(Enable_Debug_Logging) Print("[LIMIT] Max trades: ", dailyTradeCount);
         return;
     }
     
@@ -272,29 +261,10 @@ void OnTick()
     if(Use_Trailing_Stop)
         ManageOpenPositions();
     
-    // Check volatility filter BEFORE opening new trades (NEW - v1.03)
-    if(Enable_Volatility_Filter && !PassVolatilityFilter())
-    {
-        if(Enable_Debug_Logging)
-            Print("[PROTECTION] Volatility too high - NEWS SPIKE DETECTED!");
-        return;
-    }
-    
-    // Check spread filter (NEW - v1.03)
-    if(Enable_Spread_Filter && !PassSpreadFilter())
-    {
-        if(Enable_Debug_Logging)
-            Print("[PROTECTION] Spread too wide - avoiding trade");
-        return;
-    }
-    
-    // Check news times (NEW - v1.03)
-    if(Avoid_News_Times && !PassNewsFilter())
-    {
-        if(Enable_Debug_Logging)
-            Print("[PROTECTION] Near major news time - avoiding trade");
-        return;
-    }
+    // Check filters before opening new trades
+    if(Enable_Volatility_Filter && !PassVolatilityFilter()) return;
+    if(Enable_Spread_Filter && !PassSpreadFilter()) return;
+    if(Avoid_News_Times && !PassNewsFilter()) return;
     
     // Check if we already have an open position (one trade at a time rule)
     if(HasOpenPosition())
@@ -400,20 +370,13 @@ void CheckDailyReset()
     MqlDateTime lastTime;
     TimeToStruct(lastResetDate, lastTime);
     
-    // Check if it's a new day
     if(currentTime.day != lastTime.day || currentTime.mon != lastTime.mon || currentTime.year != lastTime.year)
     {
-        // Reset daily tracking
         dailyStartEquity = accountInfo.Equity();
         lastResetDate = TimeCurrent();
         dailyTradeCount = 0;
         dailyLossLimitHit = false;
-        
-        Print("========================================");
-        Print("NEW TRADING DAY - Daily limits reset");
-        Print("Starting Equity: $", DoubleToString(dailyStartEquity, 2));
-        Print("Trades available today: ", Max_Trades_Per_Day);
-        Print("========================================");
+        Print("[NEW DAY] Equity: $", DoubleToString(dailyStartEquity, 2), " | Trades: ", Max_Trades_Per_Day, " available");
     }
 }
 
@@ -468,10 +431,8 @@ bool PassVolatilityFilter()
     
     if(atr_ratio > Max_ATR_Multiplier)
     {
-        Print("[VOLATILITY FILTER] ATR spike detected: ", DoubleToString(atr_ratio, 2), "x normal");
-        Print("Current ATR: ", DoubleToString(atr_current[0], 2), " vs Average: ", DoubleToString(atr_longterm[0], 2));
-        Print("⚠️ Likely NEWS EVENT - Avoiding trade!");
-        return false; // Volatility too high, likely news
+        Print("[VOL FILTER] ATR spike: ", DoubleToString(atr_ratio, 2), "x (", DoubleToString(atr_current[0], 2), " vs ", DoubleToString(atr_longterm[0], 2), ") - NEWS EVENT!");
+        return false;
     }
     
     return true; // Volatility normal
@@ -486,8 +447,7 @@ bool PassSpreadFilter()
     
     if(spread > Max_Spread_Points)
     {
-        Print("[SPREAD FILTER] Spread too wide: ", spread, " points (max: ", Max_Spread_Points, ")");
-        Print("⚠️ Wide spread detected - Avoiding trade!");
+        Print("[SPREAD] Too wide: ", spread, " pts (max: ", Max_Spread_Points, ")");
         return false;
     }
     
@@ -505,61 +465,32 @@ bool PassNewsFilter()
     int currentHour = currentTime.hour;
     int currentDay = currentTime.day_of_week;
     
-    // NFP: First Friday of month at 12:30 GMT (8:30 EST)
-    if(currentDay == 5 && currentDay <= 7) // Friday, first week
+    // NFP: First Friday at 12:30 GMT
+    if(currentDay == 5 && currentDay <= 7 && currentHour >= (12 - News_Avoid_Hours_Before) && currentHour <= (14 + News_Avoid_Hours_After))
     {
-        if(currentHour >= (12 - News_Avoid_Hours_Before) && 
-           currentHour <= (14 + News_Avoid_Hours_After))
-        {
-            Print("[NEWS FILTER] NFP Friday - Avoiding 12:30 GMT ±", News_Avoid_Hours_Before, "-", News_Avoid_Hours_After, "hrs");
-            return false;
-        }
+        Print("[NEWS] NFP Friday - Avoiding 12:30 GMT");
+        return false;
     }
     
-    // US CPI: Usually 2nd Tuesday at 12:30 GMT
-    if(currentDay == 2 && currentTime.day >= 8 && currentTime.day <= 14)
+    // CPI: 2nd Tuesday at 12:30 GMT
+    if(currentDay == 2 && currentTime.day >= 8 && currentTime.day <= 14 && currentHour >= (12 - News_Avoid_Hours_Before) && currentHour <= (14 + News_Avoid_Hours_After))
     {
-        if(currentHour >= (12 - News_Avoid_Hours_Before) && 
-           currentHour <= (14 + News_Avoid_Hours_After))
-        {
-            Print("[NEWS FILTER] Potential CPI release - Avoiding 12:30 GMT");
-            return false;
-        }
+        Print("[NEWS] CPI Tuesday - Avoiding 12:30 GMT");
+        return false;
     }
     
-    // FOMC: Wednesday at 18:00 GMT (2:00 PM EST) - happens 8x per year
-    if(currentDay == 3) // Wednesday
+    // FOMC: Wednesday at 18:00 GMT
+    if(currentDay == 3 && currentHour >= (18 - News_Avoid_Hours_Before) && currentHour <= (20 + News_Avoid_Hours_After))
     {
-        if(currentHour >= (18 - News_Avoid_Hours_Before) && 
-           currentHour <= (20 + News_Avoid_Hours_After))
-        {
-            Print("[NEWS FILTER] Potential FOMC - Avoiding 18:00 GMT");
-            return false;
-        }
+        Print("[NEWS] FOMC Wednesday - Avoiding 18:00 GMT");
+        return false;
     }
     
-    // General high-impact news times (GMT)
-    // 8:30 GMT - European opens, UK news
-    if(currentHour >= (8 - News_Avoid_Hours_Before) && currentHour <= (9 + News_Avoid_Hours_After))
+    // Major US news window: 12:30-14:30 GMT on weekdays
+    if(currentDay >= 1 && currentDay <= 5 && currentHour >= (12 - News_Avoid_Hours_Before) && currentHour <= (14 + News_Avoid_Hours_After))
     {
-        // Allow on weekends (no news)
-        if(currentDay >= 1 && currentDay <= 5)
-        {
-            if(Enable_Debug_Logging)
-                Print("[NEWS FILTER] European session start - high volatility time");
-            return false;
-        }
-    }
-    
-    // 12:30-14:30 GMT - Major US news releases
-    if(currentHour >= (12 - News_Avoid_Hours_Before) && currentHour <= (14 + News_Avoid_Hours_After))
-    {
-        if(currentDay >= 1 && currentDay <= 5)
-        {
-            if(Enable_Debug_Logging)
-                Print("[NEWS FILTER] US news window - avoiding 12:30-14:30 GMT");
-            return false;
-        }
+        if(Enable_Debug_Logging) Print("[NEWS] US news window 12:30-14:30 GMT");
+        return false;
     }
     
     return true; // No major news expected
@@ -1012,11 +943,7 @@ double CalculatePositionSize()
         lots = lots * reductionFactor;
         
         if(Enable_Debug_Logging)
-        {
-            Print("[POSITION SIZING] Drawdown detected: ", DoubleToString(equityDrawdownPercent, 2), "%");
-            Print("[POSITION SIZING] Reducing position size by ", DoubleToString((1.0 - reductionFactor) * 100, 1), "%");
-            Print("[POSITION SIZING] Adjusted lot: ", DoubleToString(lots, 2));
-        }
+            Print("[SIZING] DD: ", DoubleToString(equityDrawdownPercent, 2), "% | Reduce: ", DoubleToString((1.0 - reductionFactor) * 100, 1), "% | Lot: ", DoubleToString(lots, 2));
     }
     
     // Get broker constraints
@@ -1094,20 +1021,14 @@ void AnalyzeAndTrade()
                 tp = ask + (ATR_Multiplier_TP * atr);
             }
             
-            Print("=== BUY SIGNAL (SMOOTH PROFIT MODE) ===");
-            Print("Entry: ", ask, " | SL: ", sl, " | TP: ", tp, " | Lot: ", lotSize);
-            Print("ATR: ", atr, " | Protection: ENABLED");
+            Print("BUY: ", ask, " | SL: ", sl, " | TP: ", tp, " | Lot: ", lotSize, " | ATR: ", atr);
             
             if(trade.Buy(lotSize, _Symbol, ask, sl, tp, Trade_Comment))
             {
-                Print("BUY order executed successfully. Ticket: ", trade.ResultOrder());
-                dailyTradeCount++; // Increment daily trade counter (v1.03)
-                Print("Daily trades: ", dailyTradeCount, " / ", Max_Trades_Per_Day);
+                dailyTradeCount++;
+                Print("✓ BUY #", trade.ResultOrder(), " | Trades today: ", dailyTradeCount, "/", Max_Trades_Per_Day);
             }
-            else
-            {
-                Print("ERROR: Buy order failed. Code: ", trade.ResultRetcode());
-            }
+            else Print("✗ BUY failed: ", trade.ResultRetcode());
         }
         }
     }
@@ -1139,20 +1060,14 @@ void AnalyzeAndTrade()
                 tp = bid - (ATR_Multiplier_TP * atr);
             }
             
-            Print("=== SELL SIGNAL (SMOOTH PROFIT MODE) ===");
-            Print("Entry: ", bid, " | SL: ", sl, " | TP: ", tp, " | Lot: ", lotSize);
-            Print("ATR: ", atr, " | Protection: ENABLED");
+            Print("SELL: ", bid, " | SL: ", sl, " | TP: ", tp, " | Lot: ", lotSize, " | ATR: ", atr);
             
             if(trade.Sell(lotSize, _Symbol, bid, sl, tp, Trade_Comment))
             {
-                Print("SELL order executed successfully. Ticket: ", trade.ResultOrder());
-                dailyTradeCount++; // Increment daily trade counter (v1.03)
-                Print("Daily trades: ", dailyTradeCount, " / ", Max_Trades_Per_Day);
+                dailyTradeCount++;
+                Print("✓ SELL #", trade.ResultOrder(), " | Trades today: ", dailyTradeCount, "/", Max_Trades_Per_Day);
             }
-            else
-            {
-                Print("ERROR: Sell order failed. Code: ", trade.ResultRetcode());
-            }
+            else Print("✗ SELL failed: ", trade.ResultRetcode());
         }
         }
     }
@@ -1205,11 +1120,8 @@ void ManageOpenPositions()
                 if(positionCurrentSL < positionOpenPrice && breakEvenSL > positionCurrentSL)
                 {
                     if(trade.PositionModify(positionInfo.Ticket(), breakEvenSL, positionInfo.TakeProfit()))
-                    {
-                        Print("[BREAK-EVEN] SL moved to break-even for ticket: ", positionInfo.Ticket());
-                        Print("Now risk-free trade!");
-                    }
-                    continue; // Don't apply trailing stop yet
+                        Print("[BE] SL→BE #", positionInfo.Ticket(), " - Risk-free!");
+                    continue;
                 }
             }
             else // SELL
@@ -1221,11 +1133,8 @@ void ManageOpenPositions()
                 if(positionCurrentSL == 0 || positionCurrentSL > positionOpenPrice)
                 {
                     if(trade.PositionModify(positionInfo.Ticket(), breakEvenSL, positionInfo.TakeProfit()))
-                    {
-                        Print("[BREAK-EVEN] SL moved to break-even for ticket: ", positionInfo.Ticket());
-                        Print("Now risk-free trade!");
-                    }
-                    continue; // Don't apply trailing stop yet
+                        Print("[BE] SL→BE #", positionInfo.Ticket(), " - Risk-free!");
+                    continue;
                 }
             }
         }
