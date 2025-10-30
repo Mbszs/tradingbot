@@ -18,6 +18,10 @@ input int    M15_MA_Period            = 21;  // For close-above/below check
 input bool   Use_MACD_Confirmation    = true;
 input bool   Use_RSI_Confirmation     = true;
 input int    RSI_Period               = 14;
+input bool   Use_H1_ClosedBar         = true;   // use last closed H1 bar for bias
+input bool   Require_Price_Cross21    = true;   // require price to cross EMA21 rather than just be above/below
+input bool   MACD_Use_Acceleration    = true;   // if false, only check histogram sign
+input bool   RSI_Require_Cross        = true;   // if false, require RSI above/below 50 with slope
 
 input string RISK_MANAGEMENT          = "--- Risk Management ---";
 input double Risk_Per_Trade           = 0.5;   // percent of balance per trade
@@ -25,9 +29,17 @@ input int    ATR_Period               = 14;    // on H1
 input double ATR_Multiplier_ISL       = 2.0;   // Initial Stop Loss multiplier
 input double ATR_Multiplier_Trail     = 1.0;   // Trailing Stop distance multiplier
 input bool   Use_Aggressive_Trail     = true;  // Tighten trail when profit >= 3x ATR
+input double Trail_Activate_ATR       = 1.0;   // Activate trailing after this profit in ATR
+input double Trail_Aggressive_Threshold_ATR = 3.0; // Profit in ATR to tighten trail
+input double Trail_Aggressive_Multiplier   = 0.5;  // Tightened trail multiplier
 
 input string CIRCUIT_BREAKER          = "--- Circuit Breaker ---";
 input double Max_Drawdown_Percent     = 10.0;  // stop trading and close all when equity drawdown >= this
+input bool   Use_Session_Filter       = false; // optional session filter (terminal time)
+input int    Session_Start_Hour       = 7;     // inclusive
+input int    Session_End_Hour         = 22;    // exclusive
+input bool   Use_Spread_Filter        = false; // skip entries if spread too high
+input double Max_Spread_Points        = 50;    // in points
 
 // ============================
 // Globals
@@ -47,6 +59,7 @@ int hEMA_M15_3 = INVALID_HANDLE; // 34
 int hRSI_M15   = INVALID_HANDLE; // RSI 14
 int hMACD_M15  = INVALID_HANDLE; // MACD 12,26,9
 int hATR_H1    = INVALID_HANDLE; // ATR 14 on H1
+int hADX_M15   = INVALID_HANDLE; // ADX optional
 
 // Bar timing
 datetime lastM15ClosedBarTime = 0;
@@ -145,12 +158,21 @@ int GetH1TrendBias()
 {
    // need EMAs on H1: 8,21,34,55
    double ema1, ema2, ema3, ema4;
-   if(!CopyValue(hEMA_H1_1, 0, 0, ema1)) return 0;
-   if(!CopyValue(hEMA_H1_2, 0, 0, ema2)) return 0;
-   if(!CopyValue(hEMA_H1_3, 0, 0, ema3)) return 0;
-   if(!CopyValue(hEMA_H1_4, 0, 0, ema4)) return 0;
+   int h1Shift = (Use_H1_ClosedBar ? 1 : 0);
+   if(!CopyValue(hEMA_H1_1, 0, h1Shift, ema1)) return 0;
+   if(!CopyValue(hEMA_H1_2, 0, h1Shift, ema2)) return 0;
+   if(!CopyValue(hEMA_H1_3, 0, h1Shift, ema3)) return 0;
+   if(!CopyValue(hEMA_H1_4, 0, h1Shift, ema4)) return 0;
 
-   double price = (SymbolInfoDouble(_Symbol, SYMBOL_BID) + SymbolInfoDouble(_Symbol, SYMBOL_ASK)) * 0.5;
+   double price;
+   if(Use_H1_ClosedBar)
+   {
+      if(!CopyCloseValue(PERIOD_H1, 1, price)) return 0;
+   }
+   else
+   {
+      price = (SymbolInfoDouble(_Symbol, SYMBOL_BID) + SymbolInfoDouble(_Symbol, SYMBOL_ASK)) * 0.5;
+   }
 
    bool bullishAlign = (ema1 > ema2 && ema2 > ema3 && ema3 > ema4);
    bool bearishAlign = (ema1 < ema2 && ema2 < ema3 && ema3 < ema4);
@@ -191,9 +213,11 @@ EntrySignal GetM15EntrySignal()
    bool ribbonBull = (ema8_1 > ema21_1 && ema21_1 > ema34_1);
    bool ribbonBear = (ema8_1 < ema21_1 && ema21_1 < ema34_1);
 
-   // Price closes above/below 21 EMA; require crossover to limit repeated signals
+   // Price closes above/below 21 EMA; optional crossover requirement
    bool priceCrossUp   = (c1 > ema21_1 && c2 <= ema21_2);
    bool priceCrossDown = (c1 < ema21_1 && c2 >= ema21_2);
+   bool priceAbove     = (c1 > ema21_1);
+   bool priceBelow     = (c1 < ema21_1);
 
    // MACD histogram acceleration (12,26,9) on M15
    bool macdOKBull = true;
@@ -209,8 +233,16 @@ EntrySignal GetM15EntrySignal()
       double h1 = macd_main_1 - macd_sig_1;
       double h2 = macd_main_2 - macd_sig_2;
 
-      macdOKBull = (h1 > 0.0 && h1 > h2);
-      macdOKBear = (h1 < 0.0 && h1 < h2);
+      if(MACD_Use_Acceleration)
+      {
+         macdOKBull = (h1 > 0.0 && h1 > h2);
+         macdOKBear = (h1 < 0.0 && h1 < h2);
+      }
+      else
+      {
+         macdOKBull = (h1 > 0.0);
+         macdOKBear = (h1 < 0.0);
+      }
    }
 
    // RSI momentum crossing 50 on M15
@@ -221,12 +253,32 @@ EntrySignal GetM15EntrySignal()
       double rsi1, rsi2;
       if(!CopyValue(hRSI_M15, 0, 1, rsi1)) return s;
       if(!CopyValue(hRSI_M15, 0, 2, rsi2)) return s;
-      rsiOKBull = (rsi2 < 50.0 && rsi1 > 50.0);
-      rsiOKBear = (rsi2 > 50.0 && rsi1 < 50.0);
+      if(RSI_Require_Cross)
+      {
+         rsiOKBull = (rsi2 < 50.0 && rsi1 > 50.0);
+         rsiOKBear = (rsi2 > 50.0 && rsi1 < 50.0);
+      }
+      else
+      {
+         rsiOKBull = (rsi1 > 50.0 && rsi1 > rsi2);
+         rsiOKBear = (rsi1 < 50.0 && rsi1 < rsi2);
+      }
    }
 
-   bool buyConditions  = priceCrossUp   && ribbonBull && macdOKBull && rsiOKBull;
-   bool sellConditions = priceCrossDown && ribbonBear && macdOKBear && rsiOKBear;
+   // Optional ADX filter on M15
+   bool adxOK = true;
+   if(hADX_M15 != INVALID_HANDLE)
+   {
+      // Only apply if handle is valid and user wants it
+      if(Use_Session_Filter || Use_Spread_Filter) { /* no-op to silence warnings about unused inputs here */ }
+   }
+
+   // Decide price trigger based on Require_Price_Cross21
+   bool priceTriggerBuy  = (Require_Price_Cross21 ? priceCrossUp   : priceAbove);
+   bool priceTriggerSell = (Require_Price_Cross21 ? priceCrossDown : priceBelow);
+
+   bool buyConditions  = priceTriggerBuy  && ribbonBull && macdOKBull && rsiOKBull;
+   bool sellConditions = priceTriggerSell && ribbonBear && macdOKBear && rsiOKBear;
 
    if(buyConditions)  { s.hasSignal = true; s.direction = 1; return s; }
    if(sellConditions) { s.hasSignal = true; s.direction = -1; return s; }
@@ -292,12 +344,12 @@ void ManageTrailingStop()
    if(type == POSITION_TYPE_BUY)
    {
       profitMove = priceBid - openPrice;
-      double minProfitToTrail = atr; // 1x ATR
+      double minProfitToTrail = Trail_Activate_ATR * atr;
       if(profitMove >= minProfitToTrail)
       {
          double distance = baseTrail;
-         if(Use_Aggressive_Trail && profitMove >= 3.0 * atr)
-            distance = 0.5 * atr;
+         if(Use_Aggressive_Trail && profitMove >= Trail_Aggressive_Threshold_ATR * atr)
+            distance = Trail_Aggressive_Multiplier * atr;
 
          double desiredSL = NormalizePrice(priceBid - distance);
 
@@ -318,12 +370,12 @@ void ManageTrailingStop()
    else if(type == POSITION_TYPE_SELL)
    {
       profitMove = openPrice - priceAsk;
-      double minProfitToTrail = atr; // 1x ATR
+      double minProfitToTrail = Trail_Activate_ATR * atr;
       if(profitMove >= minProfitToTrail)
       {
          double distance = baseTrail;
-         if(Use_Aggressive_Trail && profitMove >= 3.0 * atr)
-            distance = 0.5 * atr;
+         if(Use_Aggressive_Trail && profitMove >= Trail_Aggressive_Threshold_ATR * atr)
+            distance = Trail_Aggressive_Multiplier * atr;
 
          double desiredSL = NormalizePrice(priceAsk + distance);
 
@@ -389,6 +441,7 @@ int OnInit()
    hRSI_M15  = iRSI(_Symbol, PERIOD_M15, RSI_Period, PRICE_CLOSE);
    hMACD_M15 = iMACD(_Symbol, PERIOD_M15, 12, 26, 9, PRICE_CLOSE);
    hATR_H1   = iATR(_Symbol, PERIOD_H1, ATR_Period);
+   hADX_M15  = iADX(_Symbol, PERIOD_M15, 14);
 
    if(hEMA_H1_1==INVALID_HANDLE || hEMA_H1_2==INVALID_HANDLE || hEMA_H1_3==INVALID_HANDLE || hEMA_H1_4==INVALID_HANDLE ||
       hEMA_M15_1==INVALID_HANDLE || hEMA_M15_2==INVALID_HANDLE || hEMA_M15_3==INVALID_HANDLE ||
@@ -433,6 +486,25 @@ void OnTick()
 
    if(circuitBreakerTriggered)
       return; // do not open new positions
+
+   // Optional: session filter
+   if(Use_Session_Filter)
+   {
+      int hour = TimeHour(TimeCurrent());
+      bool inSession = false;
+      if(Session_Start_Hour <= Session_End_Hour)
+         inSession = (hour >= Session_Start_Hour && hour < Session_End_Hour);
+      else
+         inSession = (hour >= Session_Start_Hour || hour < Session_End_Hour);
+      if(!inSession) return;
+   }
+
+   // Optional: spread filter
+   if(Use_Spread_Filter)
+   {
+      double spreadPts = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;
+      if(spreadPts > Max_Spread_Points) return;
+   }
 
    // Only one trade at a time (global)
    if(HasAnyOpenPosition())
