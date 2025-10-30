@@ -909,7 +909,8 @@ void ManageOpenPositions()
             
             if(positionInfo.Type() == POSITION_TYPE_BUY)
             {
-                breakEvenSL = positionOpenPrice + (SymbolInfoDouble(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+                double spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+                breakEvenSL = positionOpenPrice + spread;
                 
                 // Only move to BE if current SL is below open price
                 if(positionCurrentSL < positionOpenPrice && breakEvenSL > positionCurrentSL)
@@ -924,7 +925,8 @@ void ManageOpenPositions()
             }
             else // SELL
             {
-                breakEvenSL = positionOpenPrice - (SymbolInfoDouble(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+                double spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+                breakEvenSL = positionOpenPrice - spread;
                 
                 // Only move to BE if current SL is above open price
                 if(positionCurrentSL == 0 || positionCurrentSL > positionOpenPrice)
