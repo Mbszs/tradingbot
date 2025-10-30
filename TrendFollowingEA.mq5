@@ -46,6 +46,10 @@ input int ATR_Period = 14;          // ATR Period
 input double ATR_Multiplier_ISL = 2.0;  // ATR Multiplier for Initial Stop Loss (if enabled)
 input bool Use_Trailing_Stop = false; // Use trailing stop
 input double ATR_Multiplier_Trail = 1.0; // ATR Multiplier for Trailing Stop
+input double ATR_Profit_Activation = 1.0; // ATR profit to activate trailing stop
+input bool Use_Aggressive_Trail = false; // Tighten trail on big profits
+input double ATR_Aggressive_Threshold = 3.0; // ATR profit for aggressive trail
+input double ATR_Aggressive_Multiplier = 0.5; // Aggressive trail multiplier
 
 // === Exit Management ===
 sinput group "=== Exit Management ==="
