@@ -86,6 +86,12 @@ bool CopyTimeValue(ENUM_TIMEFRAMES tf, int shift, datetime &out)
    return true;
 }
 
+// Rounding helper to avoid MathRound dependency in older terminals
+double RoundNearest(double x)
+{
+   return (x >= 0.0 ? MathFloor(x + 0.5) : MathCeil(x - 0.5));
+}
+
 // Determine the number of decimal digits required by a step size (up to 8 digits)
 int CountStepDigits(double step)
 {
@@ -93,7 +99,7 @@ int CountStepDigits(double step)
    int digits = 0;
    double v = step;
    // increase precision until v is (almost) an integer or we hit a reasonable cap
-   while(digits < 8 && MathAbs(v - MathRound(v)) > 1e-12)
+   while(digits < 8 && MathAbs(v - RoundNearest(v)) > 1e-12)
    {
       v *= 10.0;
       digits++;
@@ -113,7 +119,8 @@ double NormalizeVolumeToStep(double volume)
    if(v < minv) v = minv;
    if(v > maxv) v = maxv;
    int stepDigits = CountStepDigits(step);
-   return NormalizeDouble(v, MathMax(0, stepDigits));
+   if(stepDigits < 0) stepDigits = 0;
+   return NormalizeDouble(v, stepDigits);
 }
 
 // Ensures price is aligned to tick size and symbol digits
@@ -121,10 +128,11 @@ double NormalizePrice(double price)
 {
    double tick = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    if(tick <= 0.0) tick = _Point;
-   double n = MathRound(price / tick);
+   double n = RoundNearest(price / tick);
    double aligned = n * tick;
    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-   return NormalizeDouble(aligned, MathMax(0, digits));
+   if(digits < 0) digits = 0;
+   return NormalizeDouble(aligned, digits);
 }
 
 // ============================
@@ -238,7 +246,8 @@ double CalculatePositionSize(int direction, double entryPrice, double stopPrice)
 {
    // Risk amount in account currency
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double riskFraction = MathMax(0.0, Risk_Per_Trade) / 100.0;
+   double riskFraction = Risk_Per_Trade / 100.0;
+   if(riskFraction < 0.0) riskFraction = 0.0;
    double riskAmount = balance * riskFraction;
    if(riskAmount <= 0.0) return 0.0;
 
