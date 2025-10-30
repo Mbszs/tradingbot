@@ -358,10 +358,11 @@ void UpdateCircuitBreaker()
       Print(LogPrefix(), "Circuit breaker TRIGGERED: drawdown ", DoubleToString(ddPct, 2), "% >= ", DoubleToString(Max_Drawdown_Percent, 2), "%.");
 
       // Close all existing positions
-      for(int i = PositionsTotal() - 1; i >= 0; --i)
+      int i;
+      for(i = PositionsTotal() - 1; i >= 0; i--)
       {
          if(!PositionSelectByIndex(i)) continue;
-         string sym = (string)PositionGetString(POSITION_SYMBOL);
+         string sym = PositionGetString(POSITION_SYMBOL);
          trade.PositionClose(sym);
       }
    }
