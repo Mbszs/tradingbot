@@ -19,14 +19,14 @@
 //+------------------------------------------------------------------+
 
 // === H1 Trend Setup ===
-input group "=== H1 Trend Setup ==="
+sinput group "=== H1 Trend Setup ==="
 input int MA_Period_1 = 8;          // Fast EMA Period
 input int MA_Period_2 = 21;         // Medium EMA Period
 input int MA_Period_3 = 34;         // Slow EMA Period
 input int MA_Period_4 = 55;         // Slowest EMA Period (Trend Filter)
 
 // === M15 Entry Setup ===
-input group "=== M15 Entry Setup ==="
+sinput group "=== M15 Entry Setup ==="
 input int M15_MA_Period = 21;       // M15 EMA Period for Entry
 input bool Use_MACD_Confirmation = true;  // Use MACD Confirmation
 input int MACD_Fast = 12;           // MACD Fast Period
@@ -38,7 +38,7 @@ input double RSI_Level = 50.0;      // RSI Level for Momentum
 input bool Strict_RSI_Cross = false; // Require exact RSI crossover (strict)
 
 // === Risk Management ===
-input group "=== Risk Management ==="
+sinput group "=== Risk Management ==="
 input double Risk_Per_Trade = 0.5;  // Risk % per trade (0.5 = 0.5%)
 input double Fixed_Lot_Size = 0.0;  // Fixed lot size (0 = auto calculate)
 input bool Use_Stop_Loss = false;   // Use stop loss (NOT RECOMMENDED)
@@ -48,13 +48,13 @@ input bool Use_Trailing_Stop = false; // Use trailing stop
 input double ATR_Multiplier_Trail = 1.0; // ATR Multiplier for Trailing Stop
 
 // === Exit Management ===
-input group "=== Exit Management ==="
+sinput group "=== Exit Management ==="
 input bool Exit_On_Opposite_Signal = true;  // Close on opposite entry signal
 input bool Exit_On_EMA_Cross = true;        // Close when price crosses 21 EMA opposite
 input bool Exit_On_Trend_Change = false;    // Close when H1 trend changes
 
 // === Trading Sessions ===
-input group "=== Trading Sessions ==="
+sinput group "=== Trading Sessions ==="
 input bool Use_Session_Filter = true;       // Enable session filter
 input bool Trade_Asian_Session = false;     // Trade Asian session (00:00-09:00 GMT)
 input bool Trade_London_Session = true;     // Trade London session (08:00-17:00 GMT)
@@ -63,12 +63,12 @@ input bool Override_On_Strong_Trend = true; // Trade anytime if strong trend det
 input double Strong_Trend_ADX_Level = 25.0; // ADX level for strong trend
 
 // === Circuit Breaker (Optional) ===
-input group "=== Circuit Breaker (Disabled by Default) ==="
+sinput group "=== Circuit Breaker (Disabled by Default) ==="
 input bool Enable_Circuit_Breaker = false;  // Enable Circuit Breaker
 input double Max_Drawdown_Percent = 20.0;   // Max Drawdown % before shutdown
 
 // === General Settings ===
-input group "=== General Settings ==="
+sinput group "=== General Settings ==="
 input int Magic_Number = 20251030;  // Magic Number
 input string Trade_Comment = "TrendFollowEA"; // Trade Comment
 input int Slippage = 10;            // Slippage in points
@@ -342,6 +342,7 @@ bool IsStrongTrend()
     double adx[];
     ArraySetAsSeries(adx, true);
     
+    // ADX main line is buffer 0
     if(CopyBuffer(h1_adx_handle, 0, 0, 2, adx) <= 0)
         return false;
     
