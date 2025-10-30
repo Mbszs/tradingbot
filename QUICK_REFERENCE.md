@@ -36,12 +36,14 @@
 **Buy Entry:**
 1. Price closes above 21 EMA + (8 > 21 > 34)
 2. MACD histogram > 0 AND accelerating
-3. RSI crosses above 50
+3. RSI > 50 AND rising (relaxed mode - default)
+   - Or RSI crosses above 50 (strict mode - optional)
 
 **Sell Entry:**
 1. Price closes below 21 EMA + (8 < 21 < 34)
 2. MACD histogram < 0 AND accelerating
-3. RSI crosses below 50
+3. RSI < 50 AND falling (relaxed mode - default)
+   - Or RSI crosses below 50 (strict mode - optional)
 
 ### Exit Strategy
 
@@ -65,6 +67,8 @@ Risk_Per_Trade = 0.5          // Start conservative
 ATR_Multiplier_ISL = 2.0      // Initial stop loss
 ATR_Multiplier_Trail = 1.0    // Trailing distance
 Max_Drawdown_Percent = 10.0   // Circuit breaker
+Strict_RSI_Cross = false      // Use relaxed RSI (RECOMMENDED)
+Enable_Debug_Logging = true   // Show detailed logs (disable after testing)
 ```
 
 ### Optimization Targets
@@ -116,16 +120,32 @@ Consecutive Loss: > 10
 1. ✅ AutoTrading enabled (green button)
 2. ✅ Smiley face in chart corner
 3. ✅ No errors in Experts tab
-4. ✅ H1 trend bias exists
-5. ✅ No open position already
-6. ✅ Circuit breaker not triggered
+4. ✅ **Enable_Debug_Logging = true** (see what's happening!)
+5. ✅ Check Experts log for condition details
+6. ✅ H1 trend bias exists
+7. ✅ No open position already
+8. ✅ Circuit breaker not triggered
+9. ✅ **Strict_RSI_Cross = false** (relaxed mode recommended)
 
-**Fix:**
+**Debug Fix:**
 ```
-- Restart MT5
-- Re-compile EA (F7 in MetaEditor)
-- Check Experts log for errors
-- Verify symbol name (XAUUSD vs GOLD)
+1. Set Enable_Debug_Logging = true
+2. Run backtest or live EA
+3. Open Experts tab (Ctrl+T)
+4. Look for [DEBUG] messages showing which conditions fail:
+   - "H1 Trend Bias: NEUTRAL" = waiting for trend
+   - "MA Condition: FAIL" = EMAs not aligned
+   - "MACD Condition: FAIL" = histogram not right
+   - "RSI Condition: FAIL" = RSI not in momentum zone
+5. Adjust parameters or wait for market conditions
+```
+
+**Common Issue - ZERO TRADES:**
+```
+Problem: EA takes no trades
+Cause: Strict_RSI_Cross = true (too restrictive!)
+Fix: Set Strict_RSI_Cross = false
+Expected: Should see trades with relaxed RSI mode
 ```
 
 ### Poor Backtest Results

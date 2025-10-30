@@ -40,8 +40,9 @@ Once H1 bias is established, the EA waits for **ALL THREE** confirmations on M15
 - **Sell:** MACD histogram < 0 AND accelerating (current < previous)
 
 #### C) RSI Momentum
-- **Buy:** RSI crosses above 50 from below
-- **Sell:** RSI crosses below 50 from above
+- **Buy:** RSI above 50 and rising (building bullish momentum)
+- **Sell:** RSI below 50 and falling (building bearish momentum)
+- **Note:** By default uses relaxed mode (RSI trending), not strict crossover
 
 ### 3. Risk Management
 
@@ -117,6 +118,7 @@ Use_MACD_Confirmation = true      // Enable MACD filter
 Use_RSI_Confirmation = true       // Enable RSI filter
 RSI_Period = 14
 RSI_Level = 50.0                  // Momentum threshold
+Strict_RSI_Cross = false          // Use relaxed RSI (recommended)
 ```
 
 #### Risk Management
@@ -137,22 +139,32 @@ Max_Drawdown_Percent = 10.0       // Shutdown at 10% drawdown
 Enable_Circuit_Breaker = true     // Enable safety feature
 ```
 
+#### General Settings
+```
+Enable_Debug_Logging = true       // Show detailed logs (disable after testing)
+Magic_Number = 20251030           // Unique EA identifier
+Trade_Comment = "TrendFollowEA"   // Trade label
+```
+
 ### Recommended Settings for Different Account Sizes
 
 **Conservative (< $5,000):**
 - Risk_Per_Trade = 0.5%
 - Enable_Circuit_Breaker = true
 - Max_Drawdown_Percent = 8%
+- Strict_RSI_Cross = false
 
 **Standard ($5,000 - $25,000):**
 - Risk_Per_Trade = 0.75%
 - Enable_Circuit_Breaker = true
 - Max_Drawdown_Percent = 10%
+- Strict_RSI_Cross = false
 
 **Aggressive (> $25,000):**
 - Risk_Per_Trade = 1.0%
 - Enable_Circuit_Breaker = true
 - Max_Drawdown_Percent = 12%
+- Strict_RSI_Cross = false
 
 ---
 
@@ -293,10 +305,17 @@ For optimal performance, ensure your broker provides:
 1. AutoTrading enabled (button in toolbar should be green)
 2. EA has smiley face icon in top-right of chart
 3. No errors in "Experts" tab (Ctrl+T → Experts)
-4. H1 trend bias exists (check EMAs manually)
-5. M15 confirmations all present
-6. Circuit breaker not triggered
-7. No existing open position
+4. **Enable debug logging** (`Enable_Debug_Logging = true`) to see why trades aren't taken
+5. Check "Experts" log for detailed condition checks
+6. H1 trend bias exists (check EMAs manually)
+7. M15 confirmations all present
+8. Circuit breaker not triggered
+9. No existing open position
+
+**Debug Mode:**
+- Set `Enable_Debug_Logging = true` in EA settings
+- Check "Experts" tab to see which condition is failing
+- Common issues: No H1 trend, RSI not in momentum zone, MACD not accelerating
 
 ### EA Crashing or Errors
 

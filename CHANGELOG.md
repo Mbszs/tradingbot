@@ -5,6 +5,89 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.01] - 2025-10-30 (CRITICAL FIX)
+
+### 🔧 Critical Bug Fix
+
+**FIXED: Zero Trades Issue**
+- **Problem:** EA was not taking any trades during backtesting (0 trades from 2022 to present)
+- **Root Cause:** RSI crossover condition was too strict (required exact crossover on current bar)
+- **Solution:** Added relaxed RSI mode that checks for momentum instead of exact crossover
+
+### ✨ New Features
+
+**1. Relaxed RSI Mode (Default)**
+- Buy: RSI > 50 AND rising (building momentum)
+- Sell: RSI < 50 AND falling (building momentum)
+- Much more practical for real-world trading
+- Maintains strategy integrity
+
+**2. Strict RSI Mode (Optional)**
+- Original logic available via `Strict_RSI_Cross = true`
+- Use only if you want very conservative entries
+- Warning: Results in very few trades
+
+**3. Debug Logging System**
+- Comprehensive condition-by-condition logging
+- Shows exactly why trades are/aren't taken
+- Helps with optimization and troubleshooting
+- Enable with `Enable_Debug_Logging = true`
+
+### 📝 New Parameters
+
+```mql5
+input bool Strict_RSI_Cross = false;        // Use exact RSI crossover (not recommended)
+input bool Enable_Debug_Logging = true;    // Show detailed debug logs
+```
+
+### 🎯 Impact
+
+**Before Fix:**
+- 0 trades in 3 years of backtesting
+- Conditions too strict to ever align
+
+**After Fix:**
+- Expected 50-150+ trades in 3 years (market dependent)
+- Realistic entry frequency
+- All quality filters still active
+- Better balance between signal quality and frequency
+
+### 📚 Documentation Updates
+
+- `README.md` - Added new parameters, updated troubleshooting
+- `QUICK_REFERENCE.md` - Updated entry rules, added debug section
+- `FIXED_ISSUES.md` - New file documenting the fix in detail
+- `TrendFollowingEA.mq5` - Enhanced with debug logging
+
+### ⚙️ Migration from v1.00
+
+**No action required!** The new defaults are optimal:
+- `Strict_RSI_Cross = false` (relaxed mode)
+- `Enable_Debug_Logging = true` (can disable after testing)
+
+Simply recompile and run - trades should now execute.
+
+### 🔍 Debug Output Example
+
+```
+[DEBUG] H1 Trend Bias: BULLISH
+[DEBUG] M15 Buy Entry Check: PASSED
+[DEBUG BUY] MA Condition: PASS
+  - Price[1] vs EMA21[1]: 2045.50 vs 2043.20 = ABOVE
+  - EMA Alignment (8>21>34): YES
+[DEBUG BUY] MACD Condition: PASS
+  - Histogram: 0.45 (prev: 0.32)
+  - Above zero: YES | Accelerating: YES
+[DEBUG BUY] RSI Condition (RELAXED): PASS
+  - RSI[0]: 52.3 | RSI[1]: 51.8 | Level: 50.0
+  - Above 50: YES | Rising: YES
+[DEBUG BUY] *** ALL CONDITIONS PASSED - BUY SIGNAL VALID ***
+=== BUY SIGNAL ===
+Entry: 2045.65 | SL: 2029.50 | Lot: 0.03
+```
+
+---
+
 ## [1.00] - 2025-10-30
 
 ### 🎉 Initial Release

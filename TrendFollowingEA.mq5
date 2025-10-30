@@ -5,8 +5,10 @@
 //+------------------------------------------------------------------+
 #property copyright "TrendFollowing EA 2025"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property strict
+#property description "Fixed: Zero trades issue - RSI now uses relaxed momentum mode"
+#property description "Added: Debug logging system for troubleshooting"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -33,6 +35,7 @@ input int MACD_Signal = 9;          // MACD Signal Period
 input bool Use_RSI_Confirmation = true;   // Use RSI Confirmation
 input int RSI_Period = 14;          // RSI Period
 input double RSI_Level = 50.0;      // RSI Level for Momentum
+input bool Strict_RSI_Cross = false; // Require exact RSI crossover (strict)
 
 // === Risk Management ===
 input group "=== Risk Management ==="
@@ -55,6 +58,7 @@ input group "=== General Settings ==="
 input int Magic_Number = 20251030;  // Magic Number
 input string Trade_Comment = "TrendFollowEA"; // Trade Comment
 input int Slippage = 10;            // Slippage in points
+input bool Enable_Debug_Logging = true; // Enable detailed debug logs
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
@@ -308,7 +312,16 @@ bool CheckM15BuyEntry()
     if(CopyClose(_Symbol, PERIOD_M15, 0, 3, close) <= 0) return false;
     
     // Condition 1: Price closed above 21 EMA AND EMA alignment (8 > 21 > 34)
-    bool maCondition = (close[1] > ema21[1]) && (ema8[0] > ema21[0]) && (ema21[0] > ema34[0]);
+    bool priceAbove21 = close[1] > ema21[1];
+    bool emaAlignment = (ema8[0] > ema21[0]) && (ema21[0] > ema34[0]);
+    bool maCondition = priceAbove21 && emaAlignment;
+    
+    if(Enable_Debug_Logging)
+    {
+        Print("[DEBUG BUY] MA Condition: ", maCondition ? "PASS" : "FAIL");
+        Print("[DEBUG BUY]   - Price[1] vs EMA21[1]: ", close[1], " vs ", ema21[1], " = ", priceAbove21 ? "ABOVE" : "BELOW");
+        Print("[DEBUG BUY]   - EMA Alignment (8>21>34): ", emaAlignment ? "YES" : "NO");
+    }
     
     if(!maCondition)
         return false;
@@ -326,8 +339,19 @@ bool CheckM15BuyEntry()
         double histogram0 = macdMain[0] - macdSignal[0];
         double histogram1 = macdMain[1] - macdSignal[1];
         
+        bool macdAboveZero = histogram0 > 0;
+        bool macdAccelerating = histogram0 > histogram1;
+        bool macdCondition = macdAboveZero && macdAccelerating;
+        
+        if(Enable_Debug_Logging)
+        {
+            Print("[DEBUG BUY] MACD Condition: ", macdCondition ? "PASS" : "FAIL");
+            Print("[DEBUG BUY]   - Histogram: ", histogram0, " (prev: ", histogram1, ")");
+            Print("[DEBUG BUY]   - Above zero: ", macdAboveZero ? "YES" : "NO", " | Accelerating: ", macdAccelerating ? "YES" : "NO");
+        }
+        
         // Histogram above zero and accelerating
-        if(!(histogram0 > 0 && histogram0 > histogram1))
+        if(!macdCondition)
             return false;
     }
     
@@ -339,10 +363,38 @@ bool CheckM15BuyEntry()
         
         if(CopyBuffer(m15_rsi_handle, 0, 0, 3, rsi) <= 0) return false;
         
-        // RSI crosses above 50 from below
-        if(!(rsi[0] > RSI_Level && rsi[1] <= RSI_Level))
+        bool rsiCondition = false;
+        
+        // RSI momentum check
+        if(Strict_RSI_Cross)
+        {
+            // Strict: RSI crosses above 50 from below on current bar
+            rsiCondition = (rsi[0] > RSI_Level && rsi[1] <= RSI_Level);
+            if(Enable_Debug_Logging)
+            {
+                Print("[DEBUG BUY] RSI Condition (STRICT): ", rsiCondition ? "PASS" : "FAIL");
+                Print("[DEBUG BUY]   - RSI[0]: ", rsi[0], " | RSI[1]: ", rsi[1], " | Level: ", RSI_Level);
+                Print("[DEBUG BUY]   - Cross from below required");
+            }
+        }
+        else
+        {
+            // Relaxed: RSI above 50 and rising (building momentum)
+            rsiCondition = (rsi[0] > RSI_Level && rsi[0] > rsi[1]);
+            if(Enable_Debug_Logging)
+            {
+                Print("[DEBUG BUY] RSI Condition (RELAXED): ", rsiCondition ? "PASS" : "FAIL");
+                Print("[DEBUG BUY]   - RSI[0]: ", rsi[0], " | RSI[1]: ", rsi[1], " | Level: ", RSI_Level);
+                Print("[DEBUG BUY]   - Above ", RSI_Level, ": ", rsi[0] > RSI_Level ? "YES" : "NO", " | Rising: ", rsi[0] > rsi[1] ? "YES" : "NO");
+            }
+        }
+        
+        if(!rsiCondition)
             return false;
     }
+    
+    if(Enable_Debug_Logging)
+        Print("[DEBUG BUY] *** ALL CONDITIONS PASSED - BUY SIGNAL VALID ***");
     
     return true;
 }
@@ -365,7 +417,16 @@ bool CheckM15SellEntry()
     if(CopyClose(_Symbol, PERIOD_M15, 0, 3, close) <= 0) return false;
     
     // Condition 1: Price closed below 21 EMA AND EMA alignment (8 < 21 < 34)
-    bool maCondition = (close[1] < ema21[1]) && (ema8[0] < ema21[0]) && (ema21[0] < ema34[0]);
+    bool priceBelow21 = close[1] < ema21[1];
+    bool emaAlignment = (ema8[0] < ema21[0]) && (ema21[0] < ema34[0]);
+    bool maCondition = priceBelow21 && emaAlignment;
+    
+    if(Enable_Debug_Logging)
+    {
+        Print("[DEBUG SELL] MA Condition: ", maCondition ? "PASS" : "FAIL");
+        Print("[DEBUG SELL]   - Price[1] vs EMA21[1]: ", close[1], " vs ", ema21[1], " = ", priceBelow21 ? "BELOW" : "ABOVE");
+        Print("[DEBUG SELL]   - EMA Alignment (8<21<34): ", emaAlignment ? "YES" : "NO");
+    }
     
     if(!maCondition)
         return false;
@@ -383,8 +444,19 @@ bool CheckM15SellEntry()
         double histogram0 = macdMain[0] - macdSignal[0];
         double histogram1 = macdMain[1] - macdSignal[1];
         
+        bool macdBelowZero = histogram0 < 0;
+        bool macdAccelerating = histogram0 < histogram1;
+        bool macdCondition = macdBelowZero && macdAccelerating;
+        
+        if(Enable_Debug_Logging)
+        {
+            Print("[DEBUG SELL] MACD Condition: ", macdCondition ? "PASS" : "FAIL");
+            Print("[DEBUG SELL]   - Histogram: ", histogram0, " (prev: ", histogram1, ")");
+            Print("[DEBUG SELL]   - Below zero: ", macdBelowZero ? "YES" : "NO", " | Accelerating: ", macdAccelerating ? "YES" : "NO");
+        }
+        
         // Histogram below zero and accelerating
-        if(!(histogram0 < 0 && histogram0 < histogram1))
+        if(!macdCondition)
             return false;
     }
     
@@ -396,10 +468,38 @@ bool CheckM15SellEntry()
         
         if(CopyBuffer(m15_rsi_handle, 0, 0, 3, rsi) <= 0) return false;
         
-        // RSI crosses below 50 from above
-        if(!(rsi[0] < RSI_Level && rsi[1] >= RSI_Level))
+        bool rsiCondition = false;
+        
+        // RSI momentum check
+        if(Strict_RSI_Cross)
+        {
+            // Strict: RSI crosses below 50 from above on current bar
+            rsiCondition = (rsi[0] < RSI_Level && rsi[1] >= RSI_Level);
+            if(Enable_Debug_Logging)
+            {
+                Print("[DEBUG SELL] RSI Condition (STRICT): ", rsiCondition ? "PASS" : "FAIL");
+                Print("[DEBUG SELL]   - RSI[0]: ", rsi[0], " | RSI[1]: ", rsi[1], " | Level: ", RSI_Level);
+                Print("[DEBUG SELL]   - Cross from above required");
+            }
+        }
+        else
+        {
+            // Relaxed: RSI below 50 and falling (building momentum)
+            rsiCondition = (rsi[0] < RSI_Level && rsi[0] < rsi[1]);
+            if(Enable_Debug_Logging)
+            {
+                Print("[DEBUG SELL] RSI Condition (RELAXED): ", rsiCondition ? "PASS" : "FAIL");
+                Print("[DEBUG SELL]   - RSI[0]: ", rsi[0], " | RSI[1]: ", rsi[1], " | Level: ", RSI_Level);
+                Print("[DEBUG SELL]   - Below ", RSI_Level, ": ", rsi[0] < RSI_Level ? "YES" : "NO", " | Falling: ", rsi[0] < rsi[1] ? "YES" : "NO");
+            }
+        }
+        
+        if(!rsiCondition)
             return false;
     }
+    
+    if(Enable_Debug_Logging)
+        Print("[DEBUG SELL] *** ALL CONDITIONS PASSED - SELL SIGNAL VALID ***");
     
     return true;
 }
@@ -456,8 +556,18 @@ void AnalyzeAndTrade()
     // Step 1: Get H1 Trend Bias
     int trendBias = GetH1TrendBias();
     
+    if(Enable_Debug_Logging)
+    {
+        string biasStr = (trendBias == 1) ? "BULLISH" : (trendBias == -1) ? "BEARISH" : "NEUTRAL";
+        Print("[DEBUG] H1 Trend Bias: ", biasStr);
+    }
+    
     if(trendBias == 0)
+    {
+        if(Enable_Debug_Logging)
+            Print("[DEBUG] No clear H1 trend - waiting for alignment");
         return; // No clear trend
+    }
     
     // Step 2: Get H1 ATR for stop loss calculation
     double atr = GetH1ATR();
@@ -471,7 +581,13 @@ void AnalyzeAndTrade()
     double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     
     // Step 3: Check for Buy Entry
-    if(trendBias == 1 && CheckM15BuyEntry())
+    if(trendBias == 1)
+    {
+        bool buySignal = CheckM15BuyEntry();
+        if(Enable_Debug_Logging)
+            Print("[DEBUG] M15 Buy Entry Check: ", buySignal ? "PASSED" : "FAILED");
+        
+        if(buySignal)
     {
         double sl = bid - (ATR_Multiplier_ISL * atr);
         double slDistance = bid - sl;
@@ -492,9 +608,16 @@ void AnalyzeAndTrade()
                 Print("ERROR: Buy order failed. Code: ", trade.ResultRetcode());
             }
         }
+        }
     }
     // Step 4: Check for Sell Entry
-    else if(trendBias == -1 && CheckM15SellEntry())
+    else if(trendBias == -1)
+    {
+        bool sellSignal = CheckM15SellEntry();
+        if(Enable_Debug_Logging)
+            Print("[DEBUG] M15 Sell Entry Check: ", sellSignal ? "PASSED" : "FAILED");
+        
+        if(sellSignal)
     {
         double sl = ask + (ATR_Multiplier_ISL * atr);
         double slDistance = sl - ask;
@@ -514,6 +637,7 @@ void AnalyzeAndTrade()
             {
                 Print("ERROR: Sell order failed. Code: ", trade.ResultRetcode());
             }
+        }
         }
     }
 }
