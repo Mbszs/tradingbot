@@ -1,0 +1,189 @@
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║               SESSION TIMEZONE CALCULATOR                     ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+
+This guide helps you calculate the CORRECT session times for your
+broker's timezone.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📍 STEP 1: FIND YOUR BROKER'S GMT OFFSET
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Method A: Check Market Watch
+   1. Open MT5
+   2. Look at Market Watch window (Ctrl+M)
+   3. Check current time displayed
+   4. Compare to actual GMT time (google "current GMT time")
+   5. Calculate difference
+
+   Example:
+   Market Watch shows: 15:30
+   Actual GMT time: 13:30
+   Difference: +2 hours → Your broker is GMT+2
+
+Method B: Check Your Broker's Website
+   - IC Markets: GMT+2 (summer) / GMT+3 (winter)
+   - Pepperstone: GMT+2 (summer) / GMT+3 (winter)
+   - OANDA: GMT-5
+   - FXCM: GMT-5
+   - Exness: GMT+0
+   - XM: GMT+2 (summer) / GMT+3 (winter)
+
+Method C: Look at Strategy Tester Data
+   1. Run a quick backtest (any EA)
+   2. Check first candle time on M5 chart
+   3. If it's a Monday, should start around midnight
+   4. Compare to GMT Monday midnight
+   5. Calculate offset
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧮 STEP 2: CALCULATE YOUR SESSION TIMES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Formula: EA_Setting = GMT_Time + Your_Offset
+
+Standard Session Times (GMT):
+   Asia: 23:00 - 06:00
+   London: 07:00 - 11:00
+
+
+┌─────────────────────────────────────────────────────────────┐
+│                   QUICK REFERENCE TABLE                     │
+├───────────┬─────────┬─────────┬──────────┬─────────────────┤
+│ GMT Offset│ Asia    │ Asia    │ London   │ London          │
+│           │ Start   │ End     │ Start    │ End             │
+├───────────┼─────────┼─────────┼──────────┼─────────────────┤
+│ GMT-5     │   18    │    1    │    2     │     6           │
+│ GMT-4     │   19    │    2    │    3     │     7           │
+│ GMT-3     │   20    │    3    │    4     │     8           │
+│ GMT-2     │   21    │    4    │    5     │     9           │
+│ GMT-1     │   22    │    5    │    6     │    10           │
+│ GMT+0     │   23    │    6    │    7     │    11  ← Default│
+│ GMT+1     │    0    │    7    │    8     │    12           │
+│ GMT+2     │    1    │    8    │    9     │    13  ← Common │
+│ GMT+3     │    2    │    9    │   10     │    14           │
+│ GMT+4     │    3    │   10    │   11     │    15           │
+│ GMT+5     │    4    │   11    │   12     │    16           │
+└───────────┴─────────┴─────────┴──────────┴─────────────────┘
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 STEP 3: ENTER IN EA SETTINGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In MT5, when attaching EA:
+
+Session Settings section:
+   Asia Start Hour: [your calculated value]
+   Asia End Hour: [your calculated value]
+   London Start Hour: [your calculated value]
+   London End Hour: [your calculated value]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 STEP 4: VERIFY IT'S CORRECT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run Visual Mode Backtest:
+   1. Strategy Tester → Visual Mode ON
+   2. Run 1 week backtest
+   3. Watch chart
+
+You should see:
+   ✅ "SESSION STARTED: Asia" in Journal around Asian hours
+   ✅ "SESSION STARTED: London" in Journal around London hours
+   ✅ Session lines appearing on chart
+   ✅ Trades only during these sessions
+
+If trades happen at random times → Timezone still wrong!
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 COMMON EXAMPLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Example 1: IC Markets (GMT+2)
+   Problem: Using default settings (GMT+0)
+   Fix:
+      Asia Start: 1 (not 23)
+      Asia End: 8 (not 6)
+      London Start: 9 (not 7)
+      London End: 13 (not 11)
+
+Example 2: OANDA USA (GMT-5)
+   Problem: Using default settings (GMT+0)
+   Fix:
+      Asia Start: 18 (not 23)
+      Asia End: 1 (not 6)
+      London Start: 2 (not 7)
+      London End: 6 (not 11)
+
+Example 3: Exness (GMT+0)
+   Solution: Use default settings!
+      Asia Start: 23
+      Asia End: 6
+      London Start: 7
+      London End: 11
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ DST (DAYLIGHT SAVING TIME) WARNING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Some brokers change offset with DST:
+   - Summer: GMT+2
+   - Winter: GMT+3
+
+If your backtest spans summer AND winter, you may need to:
+   Option 1: Test each period separately with correct offset
+   Option 2: Use average offset (GMT+2)
+   Option 3: Accept slight misalignment in winter months
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 VALIDATION CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before running full backtest, verify:
+
+□ I know my broker's GMT offset: ___________
+□ I calculated session times using table above
+□ I entered correct times in EA settings
+□ I ran visual mode test and saw sessions start correctly
+□ Journal shows "SESSION STARTED" at correct times
+□ Red/green lines appear on chart during sessions
+□ No trades happen outside session hours
+
+If ALL checked → Ready for full backtest!
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 STILL CONFUSED?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do this simple test:
+
+1. Open XAUUSD M5 chart in MT5
+2. Look at what time "Monday 00:00" shows
+3. Compare to GMT Monday 00:00
+4. That difference = your offset
+
+OR
+
+Tell me:
+   "My broker is _______"
+   "Market Watch shows ___ when GMT is ___"
+
+And I'll calculate the correct settings for you!
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Remember: This is THE MOST COMMON PROBLEM with backtesting!
+Get this right and your results will completely change.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
