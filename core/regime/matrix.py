@@ -35,9 +35,9 @@ def label_trades_with_regime(
     t = trades.copy()
     t[time_col] = pd.to_datetime(t[time_col], utc=True)
     idx = reg.index.tz_localize("UTC") if reg.index.tz is None else reg.index.tz_convert("UTC")
-    reg_utc = pd.Series(reg.values, index=idx, name="regime")
+    reg_frame = pd.DataFrame({"bar_time": idx, "regime": reg.to_numpy()})
     t = t.sort_values(time_col)
-    merged = pd.merge_asof(t, reg_utc.reset_index().rename(columns={"index": "bar_time"}),
+    merged = pd.merge_asof(t, reg_frame,
                            left_on=time_col, right_on="bar_time", direction="backward")
     merged["regime"] = merged["regime"].fillna("UNKNOWN")
     return merged.drop(columns=["bar_time"])
