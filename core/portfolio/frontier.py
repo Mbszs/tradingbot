@@ -31,11 +31,21 @@ def random_weight_frontier(
     rng = np.random.default_rng(seed)
     R = daily_streams.fillna(0.0).to_numpy(dtype=np.float64)  # days x strategies
     n_strats = R.shape[1]
+    if max_weight < 1.0 and n_strats * max_weight < 1.0 - 1e-9:
+        raise ValueError(f"max_weight {max_weight} infeasible for {n_strats} strategies")
 
-    W = rng.dirichlet(np.ones(n_strats), size=n_portfolios)
-    if max_weight < 1.0:
-        keep = (W <= max_weight + 1e-12).all(axis=1)
-        W = W[keep]
+    # rejection-sample under the per-strategy cap until n_portfolios accepted
+    chunks: list[np.ndarray] = []
+    accepted = 0
+    for _ in range(200):
+        W = rng.dirichlet(np.ones(n_strats), size=n_portfolios)
+        if max_weight < 1.0:
+            W = W[(W <= max_weight + 1e-12).all(axis=1)]
+        chunks.append(W)
+        accepted += len(W)
+        if accepted >= n_portfolios:
+            break
+    W = np.vstack(chunks)[:n_portfolios]
 
     port_daily = R @ W.T  # days x portfolios
     growth = 1.0 + port_daily * risk_frac
