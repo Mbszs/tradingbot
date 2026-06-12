@@ -1,5 +1,23 @@
 # ICT XAUUSD Hybrid EA - Installation & Usage Guide
 
+## 🔧 Changelog (v1.01 / v2.01 correctness fixes)
+
+Both EAs received the following fixes. Recompile after updating:
+
+- **Volume filter never passed**: the EA evaluates on the first tick of a new M5 bar, so the forming bar's tick volume was ~0 and the volume confirmation always failed (silently capping the confidence score). The filter now compares the last *closed* bar against the average of the bars before it. The ATR filter similarly now uses closed-bar values only.
+- **Spurious trend on startup**: market-structure reference levels started at 0, so the first update always fired a fake "bullish MSS" and set trend = BULL. Levels are now seeded on the first run without firing a signal.
+- **Magic-number isolation**: entry blocking, break-even management, and the circuit breaker previously acted on *any* position on the symbol, including manual trades and other EAs. All position handling is now filtered by this EA's magic number.
+- **Partial TP opened opposite positions (v1)**: partial take-profit used an opposite market order, which on hedging accounts opens a *new* position instead of reducing the existing one, and it re-fired every bar. It now uses a true partial close, exactly once per position.
+- **Order filling mode**: `ORDER_FILLING_FOK` was hardcoded; brokers that only support IOC rejected every order. The supported filling mode is now auto-detected.
+- **Invalid stop-loss / lot-size blowup**: if price had already moved past the zone boundary, the SL distance could be zero or negative, producing invalid orders or oversized lots. Trades are now skipped when the SL distance is invalid or below the broker's stops level, and lot size is never rounded *up* to the broker minimum (which would exceed the configured risk %).
+- **Circuit breaker uses equity**: daily drawdown is now measured on equity, so floating losses count toward the daily limit (matches prop-firm style daily DD rules).
+- **Positions were unmanaged outside sessions**: break-even (and partial TP) logic only ran while a session was active; a position held past session close was never managed. Position management now runs on every bar.
+- **Back-to-back sessions**: if Asia's end hour equals London's start hour, the session handover is now detected (previously the session high/low never rolled over).
+- **Debug panel (v2)**: `OBJ_LABEL` cannot render multi-line text; the panel now uses `Comment()` and is visible.
+- Removed the MQL4-only `#property strict` directive and fixed the daily-reset day calculation.
+
+---
+
 ## 📋 Overview
 
 This Expert Advisor implements **ICT Smart Money Concepts** for automated XAUUSD trading on MetaTrader 5. It combines:

@@ -5,8 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "ICT XAUUSD Hybrid EA v2.0 - Strict Edition"
 #property link      ""
-#property version   "2.00"
-#property strict
+#property version   "2.01"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -143,7 +142,7 @@ int OnInit()
 {
     trade.SetExpertMagicNumber(InpMagicNumber);
     trade.SetDeviationInPoints(50);
-    trade.SetTypeFilling(ORDER_FILLING_FOK);
+    trade.SetTypeFilling(GetFillingMode());
     trade.SetAsyncMode(false);
     
     // Initialize ATR
@@ -160,9 +159,9 @@ int OnInit()
         Print("WARNING: Symbol may not be XAUUSD. Current: ", _Symbol);
     }
     
-    g_startingBalance = account.Balance();
-    g_currentDay = TimeCurrent();
-    
+    g_startingBalance = account.Equity();
+    g_currentDay = TimeCurrent() - (TimeCurrent() % 86400);
+
     InitializeStructures();
     
     Print("===========================================");
@@ -185,8 +184,9 @@ void OnDeinit(const int reason)
 {
     if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
     if(g_atrH1Handle != INVALID_HANDLE) IndicatorRelease(g_atrH1Handle);
-    
+
     ObjectsDeleteAll(0, "ICT_");
+    Comment("");
     
     Print("===========================================");
     Print("EA Statistics:");
@@ -209,20 +209,45 @@ void OnTick()
     
     CheckDailyReset();
     UpdateSessionData();
-    
-    if(!IsTradingAllowed()) return;
-    
     UpdateMarketStructure();
     DetectLiquiditySweeps();
     UpdateTradeZones();
     ManageOpenPositions();
-    
-    if(g_currentSession.tradeCount < InpMaxTradesPerSession)
-        CheckForEntrySignal();
-    
+
     if(InpShowLevels) DrawSessionLevels();
     if(InpShowZones) DrawTradeZones();
     if(InpShowDebugInfo) DrawDebugPanel();
+
+    if(!IsTradingAllowed()) return;
+
+    if(g_currentSession.tradeCount < InpMaxTradesPerSession)
+        CheckForEntrySignal();
+}
+
+//+------------------------------------------------------------------+
+//| Pick a filling mode supported by the broker                      |
+//+------------------------------------------------------------------+
+ENUM_ORDER_TYPE_FILLING GetFillingMode()
+{
+    long filling = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+    if((filling & SYMBOL_FILLING_FOK) != 0) return ORDER_FILLING_FOK;
+    if((filling & SYMBOL_FILLING_IOC) != 0) return ORDER_FILLING_IOC;
+    return ORDER_FILLING_RETURN;
+}
+
+//+------------------------------------------------------------------+
+//| Select this EA's position on the chart symbol (by magic number)  |
+//+------------------------------------------------------------------+
+bool SelectOwnPosition()
+{
+    for(int i = PositionsTotal() - 1; i >= 0; i--) {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket == 0) continue;
+        if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
+           PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+            return true;
+    }
+    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -257,15 +282,11 @@ void InitializeStructures()
 //+------------------------------------------------------------------+
 void CheckDailyReset()
 {
-    MqlDateTime timeStruct;
-    TimeToStruct(TimeCurrent(), timeStruct);
-    datetime todayStart = StringToTime(IntegerToString(timeStruct.year) + "." + 
-                                       IntegerToString(timeStruct.mon) + "." + 
-                                       IntegerToString(timeStruct.day) + " 00:00");
-    
+    datetime todayStart = TimeCurrent() - (TimeCurrent() % 86400);
+
     if(todayStart != g_currentDay) {
         g_currentDay = todayStart;
-        g_startingBalance = account.Balance();
+        g_startingBalance = account.Equity();
         g_dailyPL = 0;
         g_tradingEnabled = true;
         
@@ -281,7 +302,10 @@ void CheckDailyReset()
         Print("═══════════════════════════════════════");
     }
     
-    g_dailyPL = account.Balance() - g_startingBalance;
+    if(g_startingBalance <= 0) return;
+
+    // Use equity so floating losses also count toward the daily limit
+    g_dailyPL = account.Equity() - g_startingBalance;
     double dailyDrawdownPercent = (g_dailyPL / g_startingBalance) * 100;
     
     if(InpEnableCircuitBreaker && dailyDrawdownPercent <= -InpMaxDailyDrawdown) {
@@ -313,7 +337,13 @@ void UpdateSessionData()
     
     bool isLondonSession = (currentHour >= InpLondonStartHour && currentHour < InpLondonEndHour);
     
-    if((isAsiaSession || isLondonSession) && !wasActive) {
+    // A new session begins when none was active, or when one session
+    // hands over directly to the next (back-to-back configured hours)
+    string desiredName = isAsiaSession ? "Asia" : "London";
+    bool sessionChange = wasActive && (isAsiaSession || isLondonSession) &&
+                         g_currentSession.name != desiredName;
+
+    if(((isAsiaSession || isLondonSession) && !wasActive) || sessionChange) {
         if(g_currentSession.high > 0) {
             g_previousSession = g_currentSession;
             Print("Previous session saved: High=", g_previousSession.high, " Low=", g_previousSession.low);
@@ -322,7 +352,7 @@ void UpdateSessionData()
         g_currentSession.high = 0;
         g_currentSession.low = DBL_MAX;
         g_currentSession.isActive = true;
-        g_currentSession.name = isAsiaSession ? "Asia" : "London";
+        g_currentSession.name = desiredName;
         g_currentSession.tradeCount = 0;
         
         Print("✓ SESSION STARTED: ", g_currentSession.name, " at ", TimeToString(TimeCurrent()));
@@ -379,15 +409,24 @@ bool IsTradingAllowed()
 void UpdateMarketStructure()
 {
     int lookback = InpSwingLookback;
-    
+
     int highestBar = iHighest(_Symbol, PERIOD_M5, MODE_HIGH, lookback, 1);
-    double swingHigh = iHigh(_Symbol, PERIOD_M5, highestBar);
-    
     int lowestBar = iLowest(_Symbol, PERIOD_M5, MODE_LOW, lookback, 1);
+    if(highestBar < 0 || lowestBar < 0) return; // history not loaded yet
+
+    double swingHigh = iHigh(_Symbol, PERIOD_M5, highestBar);
     double swingLow = iLow(_Symbol, PERIOD_M5, lowestBar);
-    
+
     g_structure.mssDetected = false;
     g_structure.mssStrength = 0;
+
+    // Seed reference levels on the first run so a comparison against
+    // zero-initialized values doesn't fire a spurious MSS
+    if(g_structure.lastSwingHigh == 0 || g_structure.lastSwingLow == 0) {
+        g_structure.lastSwingHigh = swingHigh;
+        g_structure.lastSwingLow = swingLow;
+        return;
+    }
     
     // Check H1 structure for alignment
     if(InpRequireHTFAlignment) {
@@ -708,13 +747,15 @@ bool CheckATRFilter()
 {
     double atr[];
     ArraySetAsSeries(atr, true);
-    if(CopyBuffer(g_atrHandle, 0, 0, 20, atr) <= 0) return false;
-    
+    // Start at shift 1: the forming bar's ATR value is not final yet
+    if(CopyBuffer(g_atrHandle, 0, 1, 20, atr) < 20) return false;
+
     double currentATR = atr[0];
     double avgATR = 0;
     for(int i = 0; i < 20; i++) avgATR += atr[i];
     avgATR /= 20;
-    
+    if(avgATR <= 0) return false;
+
     double ratio = currentATR / avgATR;
     
     if(ratio >= InpATRMinMultiplier && ratio <= InpATRMaxMultiplier) return true;
@@ -730,14 +771,18 @@ bool CheckVolumeFilter()
 {
     long volumes[];
     ArraySetAsSeries(volumes, true);
-    if(CopyTickVolume(_Symbol, PERIOD_M5, 0, InpVolumeLookback, volumes) <= 0) return false;
-    
-    long currentVolume = volumes[0];
+    // Compare the last CLOSED bar against the average of the bars before
+    // it. The EA runs on the first tick of a new bar, so the forming
+    // bar's volume is near zero and would always fail the filter.
+    if(CopyTickVolume(_Symbol, PERIOD_M5, 1, InpVolumeLookback + 1, volumes) < InpVolumeLookback + 1)
+        return false;
+
+    long lastClosedVolume = volumes[0];
     long avgVolume = 0;
-    for(int i = 1; i < InpVolumeLookback; i++) avgVolume += volumes[i];
-    avgVolume /= (InpVolumeLookback - 1);
-    
-    if(currentVolume >= avgVolume * InpVolumeMultiplier) return true;
+    for(int i = 1; i <= InpVolumeLookback; i++) avgVolume += volumes[i];
+    avgVolume /= InpVolumeLookback;
+
+    if(lastClosedVolume >= avgVolume * InpVolumeMultiplier) return true;
     
     g_rejectedVolume++;
     return false;
@@ -748,7 +793,7 @@ bool CheckVolumeFilter()
 //+------------------------------------------------------------------+
 void CheckForEntrySignal()
 {
-    if(PositionSelect(_Symbol)) return;
+    if(SelectOwnPosition()) return;
     
     double currentPrice = iClose(_Symbol, PERIOD_M5, 0);
     
@@ -809,10 +854,22 @@ void ExecuteBuyTrade(TradeZone &zone, double confidence)
     double entryPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     double sl = zone.priceLow - InpSLBufferPoints * _Point;
     double slDistance = entryPrice - sl;
+    double minStopDistance = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+
+    if(slDistance <= minStopDistance) {
+        Print("❌ BUY SKIPPED: SL distance ", DoubleToString(slDistance, _Digits),
+              " invalid (price already below zone or inside stops level)");
+        return;
+    }
+
     double tp = entryPrice + slDistance * InpTPRiskReward;
-    
     double lotSize = CalculateLotSize(slDistance);
-    
+
+    if(lotSize <= 0) {
+        Print("❌ BUY SKIPPED: risk too small for broker minimum lot");
+        return;
+    }
+
     if(trade.Buy(lotSize, _Symbol, entryPrice, sl, tp, "ICT BUY | Conf:" + DoubleToString(confidence,2))) {
         g_currentSession.tradeCount++;
         g_lastTradeTime = TimeCurrent();
@@ -843,10 +900,22 @@ void ExecuteSellTrade(TradeZone &zone, double confidence)
     double entryPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     double sl = zone.priceHigh + InpSLBufferPoints * _Point;
     double slDistance = sl - entryPrice;
+    double minStopDistance = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+
+    if(slDistance <= minStopDistance) {
+        Print("❌ SELL SKIPPED: SL distance ", DoubleToString(slDistance, _Digits),
+              " invalid (price already above zone or inside stops level)");
+        return;
+    }
+
     double tp = entryPrice - slDistance * InpTPRiskReward;
-    
     double lotSize = CalculateLotSize(slDistance);
-    
+
+    if(lotSize <= 0) {
+        Print("❌ SELL SKIPPED: risk too small for broker minimum lot");
+        return;
+    }
+
     if(trade.Sell(lotSize, _Symbol, entryPrice, sl, tp, "ICT SELL | Conf:" + DoubleToString(confidence,2))) {
         g_currentSession.tradeCount++;
         g_lastTradeTime = TimeCurrent();
@@ -883,11 +952,17 @@ double CalculateLotSize(double slDistance)
     double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
     double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
     
+    if(slDistance <= 0 || tickSize <= 0 || tickValue <= 0 || lotStep <= 0)
+        return 0;
+
     double lotSize = riskAmount / (slDistance / tickSize * tickValue);
     lotSize = MathFloor(lotSize / lotStep) * lotStep;
-    lotSize = MathMax(minLot, MathMin(maxLot, lotSize));
-    
-    return lotSize;
+
+    // Never round UP to the minimum lot: that would risk more than the
+    // configured percentage. Skip the trade instead.
+    if(lotSize < minLot) return 0;
+
+    return MathMin(maxLot, lotSize);
 }
 
 //+------------------------------------------------------------------+
@@ -895,8 +970,9 @@ double CalculateLotSize(double slDistance)
 //+------------------------------------------------------------------+
 void ManageOpenPositions()
 {
-    if(!PositionSelect(_Symbol)) return;
-    
+    if(!SelectOwnPosition()) return;
+
+    ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
     double positionOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
     double positionSL = PositionGetDouble(POSITION_SL);
     double positionTP = PositionGetDouble(POSITION_TP);
@@ -910,10 +986,10 @@ void ManageOpenPositions()
                     (currentPrice - positionOpenPrice) : 
                     (positionOpenPrice - currentPrice);
     
-    if(InpUseBreakEven && profit >= slDistance) {
+    if(InpUseBreakEven && slDistance > 0 && profit >= slDistance) {
         if(MathAbs(positionSL - positionOpenPrice) > 10 * _Point) {
-            trade.PositionModify(_Symbol, positionOpenPrice, positionTP);
-            Print("🔒 Position moved to BREAK-EVEN");
+            if(trade.PositionModify(ticket, positionOpenPrice, positionTP))
+                Print("🔒 Position moved to BREAK-EVEN");
         }
     }
 }
@@ -926,7 +1002,10 @@ void CloseAllPositions()
     for(int i = PositionsTotal() - 1; i >= 0; i--) {
         ulong ticket = PositionGetTicket(i);
         if(PositionSelectByTicket(ticket)) {
-            if(PositionGetString(POSITION_SYMBOL) == _Symbol) {
+            // Only touch this EA's own positions, never manual trades
+            // or positions of other EAs on the same account
+            if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
+               PositionGetInteger(POSITION_MAGIC) == InpMagicNumber) {
                 trade.PositionClose(ticket);
             }
         }
@@ -1005,17 +1084,8 @@ void DrawDebugPanel()
     info += "Rejected (Conf): " + IntegerToString(g_rejectedLowConfidence) + "\n";
     info += "Rejected (ATR): " + IntegerToString(g_rejectedATR) + "\n";
     info += "Rejected (Vol): " + IntegerToString(g_rejectedVolume) + "\n";
-    
-    string objName = "ICT_Debug_Panel";
-    if(ObjectFind(0, objName) == -1) {
-        ObjectCreate(0, objName, OBJ_LABEL, 0, 0, 0);
-        ObjectSetInteger(0, objName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, objName, OBJPROP_XDISTANCE, 10);
-        ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, 30);
-        ObjectSetInteger(0, objName, OBJPROP_COLOR, clrWhite);
-        ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, 9);
-        ObjectSetString(0, objName, OBJPROP_FONT, "Courier New");
-    }
-    ObjectSetString(0, objName, OBJPROP_TEXT, info);
+
+    // OBJ_LABEL cannot render multi-line text; Comment() can
+    Comment(info);
 }
 //+------------------------------------------------------------------+
